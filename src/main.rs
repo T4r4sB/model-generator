@@ -380,36 +380,51 @@ impl Renderer {
             gl.GenBuffers(1, &mut veo);
 
             let part_creator = part_creator::PartCreator::new();
-
             let part_func = &|p| part_creator.get_part_index(p);
 
             //let part_func = &|p: Point| (p.len() < 35.0) as u32;
 
-            let mut mc = ModelCreator::new(1024, 70.0, 10);
+            //let part_func =
+            //    &|p: Point| (p.x.abs() < 35.0 && p.y.abs() < 35.0 && p.z.abs() < 35.0) as u32;
+
+            //let part_func =
+            //    &|p: Point| (p.x.abs() < 35.0 && (p.y*p.y + p.z*p.z).sqrt() < 35.0) as u32;
+
+            println!("usize={}", std::mem::size_of::<usize>());
+
+            let start = std::time::Instant::now();
+            let mut mc = ModelCreator::new(512, 70.0, 10);
+            let width = 0.05;
             while !mc.finished() {
-                mc.fill_next_layer(&part_func);
+                mc.fill_next_layer(&part_func, width);
             }
+
+            let end_layers = std::time::Instant::now();
+
+            let mut max_v = 0;
+            let mut sum_v = 0;
+
+            let mut max_v_after = 0;
+            let mut sum_v_after = 0;
 
             let mut models = mc.get_models();
             for (&m_index, m) in &mut models {
+                sum_v += m.vertices.len();
+                max_v = std::cmp::max(max_v, m.vertices.len());
                 m.validate_and_delete_small_groups();
-                let smooth_cnt = 0;
+                let smooth_cnt = 10;
                 for i in 0..smooth_cnt {
-                    m.smooth(0.1);
+                    m.smooth(0.4);
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-
-                m.validate_and_delete_small_groups();
+                m.optimize(width, m_index, &part_func);
                 println!("tcount after {}", m.triangles.len());
-
-                let mut i = 0;
-                while m.optimize(0.01, m_index, &part_func) {
-                    i += 1;
-                    println!("tcount after {i} = {}", m.triangles.len());
-                }
                 m.delete_unused_v();
                 //m.out_of_center(1.0);
+
+                sum_v_after += m.vertices.len();
+                max_v_after = std::cmp::max(max_v_after, m.vertices.len());
 
                 println!(
                     "save {m_index} to stl... {} vertices {} triangles",
@@ -423,7 +438,18 @@ impl Renderer {
                 }
             }
 
-            println!("models created");
+            let end_opt = std::time::Instant::now();
+
+            println!(
+                "models created, sum_v={}, max_v={}, after: sum_v={}, max_v={}",
+                sum_v, max_v, sum_v_after, max_v_after
+            );
+
+            println!(
+                "layers time: {:?}, opt time: {:?}",
+                end_layers - start,
+                end_opt - end_layers
+            );
 
             let mut array_buffer = ArrayBuffer::default();
             for (m_index, m) in &models {

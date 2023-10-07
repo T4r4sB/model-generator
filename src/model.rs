@@ -1,7 +1,8 @@
 use rand::seq::SliceRandom;
+use rand::SeedableRng;
 
 use crate::points3d::*;
-use std::collections::{HashMap, HashSet};
+use fxhash::{FxHashMap, FxHashSet};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Triangle(pub usize, pub usize, pub usize);
@@ -10,11 +11,12 @@ pub struct Triangle(pub usize, pub usize, pub usize);
 pub struct Model {
     pub vertices: Vec<Point>,
     pub triangles: Vec<Triangle>,
+    free_vertices: Vec<usize>,
 }
 
 #[derive(Debug, Default)]
 pub struct MeshTopology {
-    edge_to_face: HashMap<(usize, usize), (usize, usize)>,
+    edge_to_face: FxHashMap<(usize, usize), (usize, usize)>,
     face_adj: Vec<[usize; 3]>,
 }
 
@@ -29,7 +31,17 @@ impl Model {
         Self {
             vertices: Vec::new(),
             triangles: Vec::new(),
+            free_vertices: Vec::new(),
         }
+    }
+
+    pub fn add_vertex(&mut self, p: Point) -> usize {
+        if let Some(i) = self.free_vertices.pop() {
+            self.vertices[i] = p;
+            return i;
+        }
+        self.vertices.push(p);
+        self.vertices.len() - 1
     }
 
     pub fn write_to_buffer(&self, buffer: &mut ArrayBuffer, color: u32) {
@@ -96,7 +108,7 @@ impl Model {
     }
 
     pub fn get_topology(&self) -> MeshTopology {
-        let mut edge_to_face = HashMap::<(usize, usize), (usize, usize)>::new();
+        let mut edge_to_face = FxHashMap::<(usize, usize), (usize, usize)>::default();
         const BAD_INDEX: usize = usize::MAX;
         let mut make_edge = |t, v1, v2| {
             if v1 < v2 {
@@ -175,7 +187,8 @@ impl Model {
         let mut used_f = Vec::<bool>::new();
         used_f.resize(self.triangles.len(), false);
 
-        let mut control_edges: HashSet<(usize, usize)> = top.edge_to_face.keys().copied().collect();
+        let mut control_edges: FxHashSet<(usize, usize)> =
+            top.edge_to_face.keys().copied().collect();
         let mut result = 0;
 
         for (&e, &f) in &top.edge_to_face {
@@ -195,7 +208,11 @@ impl Model {
                 }
             }
 
-            if dot(self.get_normal(self.triangles[f.0]), self.get_normal(self.triangles[f.1])) > 0.5 {
+            if dot(
+                self.get_normal(self.triangles[f.0]),
+                self.get_normal(self.triangles[f.1]),
+            ) > 0.5
+            {
                 continue;
             }
 
@@ -243,7 +260,7 @@ impl Model {
     ) {
         let top = self.get_topology();
 
-        let mut middles = HashMap::<(usize, usize), usize>::new();
+        let mut middles = FxHashMap::<(usize, usize), usize>::default();
 
         for (&e, &f) in &top.edge_to_face {
             let mut e0 = self.vertices[e.0];
@@ -346,158 +363,280 @@ impl Model {
         self.triangles = new_triangles;
     }
 
-    pub fn optimize(&mut self, width: f32, model_index: u32, f: &dyn Fn(Point) -> u32) -> bool {
-        let mut deleted_triangles = Vec::<bool>::new();
-        deleted_triangles.resize(self.triangles.len(), false);
+    pub fn v_near_t(&self, v_index: usize, t: Triangle, eps: f32) -> bool {
+        let v = self.vertices[v_index];
+        let v0 = v - self.vertices[t.0];
+        let n = self.get_normal(t);
 
-        let mut t_of_v = Vec::<Vec<usize>>::new();
-        t_of_v.resize_with(self.vertices.len(), || Vec::new());
-
-        let mut edges = HashSet::<(usize, usize)>::new();
-        let mut additional_triangles = Vec::<Triangle>::new();
-
-        for i in 0..self.triangles.len() {
-            let t = self.triangles[i];
-            t_of_v[t.0].push(i);
-            t_of_v[t.1].push(i);
-            t_of_v[t.2].push(i);
-            if !edges.insert((t.0, t.1)) {
-                panic!("edge {}:{} is used twice!", t.0, t.1);
-            }
-            if !edges.insert((t.1, t.2)) {
-                panic!("edge {}:{} is used twice!", t.1, t.2);
-            }
-            if !edges.insert((t.2, t.0)) {
-                panic!("edge {}:{} is used twice!", t.2, t.0);
-            }
+        if dot(v0, n).abs() > eps {
+            return false;
         }
 
-        let mut rng = rand::thread_rng();
-        let mut v_indices: Vec<usize> = (0..self.vertices.len()).collect();
-        v_indices.shuffle(&mut rng);
+        let v1 = v - self.vertices[t.1];
+        let v2 = v - self.vertices[t.2];
 
-        'check_v: for i in v_indices {
-            let t = &t_of_v[i];
-            if t.is_empty() {
-                continue;
+        let cr01 = cross(v0, v1);
+        let cr12 = cross(v1, v2);
+        let cr20 = cross(v2, v0);
+
+        if dot(n, cr01) > 0.0 && dot(n, cr12) > 0.0 && dot(n, cr20) > 0.0 {
+            return true;
+        }
+
+        if cr01.sqr_len() < eps * eps * (v0 - v1).sqr_len()
+            && dot(v1 - v0, v1) > 0.0
+            && dot(v0 - v1, v0) > 0.0
+        {
+            return true;
+        }
+
+        if cr12.sqr_len() < eps * eps * (v1 - v2).sqr_len()
+            && dot(v2 - v1, v2) > 0.0
+            && dot(v1 - v2, v1) > 0.0
+        {
+            return true;
+        }
+
+        if cr20.sqr_len() < eps * eps * (v2 - v0).sqr_len()
+            && dot(v0 - v2, v0) > 0.0
+            && dot(v2 - v0, v2) > 0.0
+        {
+            return true;
+        }
+
+        v0.sqr_len() < eps * eps || v1.sqr_len() < eps * eps || v2.sqr_len() < eps * eps
+    }
+
+    pub fn optimize(&mut self, width: f32, model_index: u32, f: &dyn Fn(Point) -> u32) {
+        let mut v_of_t = FxHashMap::<usize, Vec<usize>>::default();
+
+        loop {
+            let mut deleted_triangles = Vec::<bool>::new();
+            deleted_triangles.resize(self.triangles.len(), false);
+
+            let mut t_of_v = Vec::<Vec<usize>>::new();
+            t_of_v.resize_with(self.vertices.len(), || Vec::new());
+
+            let mut edges = FxHashSet::<(usize, usize)>::default();
+            let mut additional_triangles = Vec::<Triangle>::new();
+
+            let mut new_v_of_t = FxHashMap::<usize, Vec<usize>>::default();
+
+            for i in 0..self.triangles.len() {
+                let t = self.triangles[i];
+                t_of_v[t.0].push(i);
+                t_of_v[t.1].push(i);
+                t_of_v[t.2].push(i);
+                if !edges.insert((t.0, t.1)) {
+                    panic!("edge {}:{} is used twice!", t.0, t.1);
+                }
+                if !edges.insert((t.1, t.2)) {
+                    panic!("edge {}:{} is used twice!", t.1, t.2);
+                }
+                if !edges.insert((t.2, t.0)) {
+                    panic!("edge {}:{} is used twice!", t.2, t.0);
+                }
             }
 
-            let mut next_v = HashMap::<usize, usize>::new();
-            for &t in t {
-                if deleted_triangles[t] {
-                    continue 'check_v;
-                }
-                let t = self.triangles[t];
-                if t.0 == i {
-                    if next_v.insert(t.1, t.2).is_some() {
-                        println!("fail with {i}");
-                        for &t in &t_of_v[i] {
-                            println!("t={:?}", self.triangles[t]);
-                        }
-                        panic!("edge {}:{} is used before!", t.1, t.2);
-                    }
-                } else if t.1 == i {
-                    if next_v.insert(t.2, t.0).is_some() {
-                        println!("fail with {i}");
-                        for &t in &t_of_v[i] {
-                            println!("t={:?}", self.triangles[t]);
-                        }
-                        panic!("edge {}:{} is used before!", t.2, t.0);
-                    }
-                } else if t.2 == i {
-                    if next_v.insert(t.0, t.1).is_some() {
-                        println!("fail with {i}");
-                        for &t in &t_of_v[i] {
-                            println!("t={:?}", self.triangles[t]);
-                        }
-                        panic!("edge {}:{} is used before!", t.0, t.1);
-                    }
+            let mut border_v = FxHashSet::default();
+            for &(v1, v2) in &edges {
+                if !edges.contains(&(v2, v1)) {
+                    border_v.insert(v1);
+                    border_v.insert(v2);
                 }
             }
 
-            let validate = |t: Triangle| -> bool {
-                let n = self.get_normal(t);
+            //let mut rng = rand::thread_rng();
+            let mut rng = rand::rngs::StdRng::seed_from_u64(2);
+            let mut v_indices: Vec<usize> = (0..self.vertices.len())
+                .filter(|i| !border_v.contains(i))
+                .collect();
+            v_indices.shuffle(&mut rng);
 
-                let validate_p = |p: Point| -> bool {
-                    if f(p) == model_index {
-                        f(p + n.scale(width)) != model_index
-                    } else {
-                        f(p - n.scale(width)) == model_index
+            'check_v: for i in v_indices {
+                let t = &t_of_v[i];
+                if t.is_empty() {
+                    continue;
+                }
+
+                let mut next_v = FxHashMap::<usize, usize>::default();
+                let mut normals = Vec::<Point>::new();
+
+                let mut control_v = FxHashMap::<usize, bool>::default();
+                let mut v_of_new_t = FxHashMap::<usize, Vec<usize>>::default();
+
+                control_v.insert(i, false);
+                for &t in t {
+                    if deleted_triangles[t] {
+                        continue 'check_v;
                     }
+
+                    if let Some(v) = v_of_t.get(&t) {
+                        for &v in v {
+                            control_v.insert(v, false);
+                        }
+                    }
+
+                    let t = self.triangles[t];
+                    if t.0 == i {
+                        if next_v.insert(t.1, t.2).is_some() {
+                            println!("fail with {i}");
+                            for &t in &t_of_v[i] {
+                                println!("t={:?}", self.triangles[t]);
+                            }
+                            panic!("edge {}:{} is used before!", t.1, t.2);
+                        }
+                    } else if t.1 == i {
+                        if next_v.insert(t.2, t.0).is_some() {
+                            println!("fail with {i}");
+                            for &t in &t_of_v[i] {
+                                println!("t={:?}", self.triangles[t]);
+                            }
+                            panic!("edge {}:{} is used before!", t.2, t.0);
+                        }
+                    } else if t.2 == i {
+                        if next_v.insert(t.0, t.1).is_some() {
+                            println!("fail with {i}");
+                            for &t in &t_of_v[i] {
+                                println!("t={:?}", self.triangles[t]);
+                            }
+                            panic!("edge {}:{} is used before!", t.0, t.1);
+                        }
+                    }
+
+                    normals.push(self.get_normal(t));
+                }
+
+                let validate = |new: Triangle, old: Triangle| -> bool {
+                    let p_new = self.get_perp(new);
+                    let p_old = self.get_perp(old);
+                    let l_new = p_new.len();
+                    let l_old = p_old.len();
+                    dot(p_new, p_old) > 0.99 * l_new * l_old
                 };
 
-                let v0 = self.vertices[t.0];
-                let v1 = self.vertices[t.1];
-                let v2 = self.vertices[t.2];
-
-                validate_p(v0)
-                    && validate_p(v1)
-                    && validate_p(v2)
-                    && validate_p((v0 + v1).scale(0.5))
-                    && validate_p((v0 + v2).scale(0.5))
-                    && validate_p((v1 + v2).scale(0.5))
-            };
-
-            for (&v, &nv) in &next_v {
-                let start = v;
-                let start_next = nv;
-                let mut n1 = nv;
-                let mut n2 = next_v.get(&n1).copied().unwrap();
-                let mut ok = true;
-                while n2 != start {
-                    if n1 != start_next && edges.contains(&(start, n1)) {
-                        ok = false;
-                        break;
-                    }
-
-                    if !validate(Triangle(start, n1, n2)) {
-                        ok = false;
-                        break;
-                    }
-
-                    n1 = n2;
-                    n2 = next_v.get(&n1).copied().unwrap();
-                }
-
-                if ok {
-                    let start = v;
-                    let start_next = nv;
-                    let mut n1 = nv;
-                    let mut n2 = next_v.get(&n1).copied().unwrap();
-                    while n2 != start {
-                        if n1 != start_next {
-                            if !edges.insert((start, n1)) {
-                                panic!("edge {}:{} is used twice!", start, n1);
+                for (&v, &nv) in &next_v {
+                    let mut near_t = |t: Triangle, index: usize| {
+                        for (&i, c) in &mut control_v {
+                            if *c {
+                                continue;
                             }
-                            if !edges.insert((n1, start)) {
-                                panic!("edge {}:{} is used twice!", start, n1);
+
+                            if self.v_near_t(i, t, width) {
+                                *c = true;
+                                v_of_new_t.entry(index).or_default().push(i);
                             }
                         }
+                    };
 
-                        additional_triangles.push(Triangle(start, n1, n2));
+                    let mut n1 = nv;
+                    let mut n2 = next_v.get(&n1).copied().unwrap();
+                    let mut ok = true;
+                    let mut cur_t = Triangle(v, n1, n2);
+
+                    if !validate(Triangle(v, n1, n2), Triangle(i, v, nv)) {
+                        ok = false;
+                    }
+
+                    while n2 != v {
+                        if n1 != nv && edges.contains(&(v, n1)) {
+                            // broken topology fix
+                            ok = false;
+                            break;
+                        }
+
+                        cur_t = Triangle(v, n1, n2);
+
+                        if !validate(cur_t, Triangle(i, n1, n2)) {
+                            ok = false;
+                            break;
+                        }
+
+                        near_t(cur_t, n1);
+
                         n1 = n2;
                         n2 = next_v.get(&n1).copied().unwrap();
                     }
 
-                    for &t in t {
-                        deleted_triangles[t] = true;
+                    if !validate(cur_t, Triangle(i, n1, n2)) {
+                        ok = false;
                     }
 
-                    continue 'check_v;
+                    ok &= control_v.iter().all(|(_, &n)| n);
+
+                    if ok {
+                        let mut n1 = nv;
+                        let mut n2 = next_v.get(&n1).copied().unwrap();
+                        while n2 != v {
+                            if n1 != nv {
+                                if !edges.insert((v, n1)) {
+                                    panic!("edge {}:{} is used twice!", v, n1);
+                                }
+                                if !edges.insert((n1, v)) {
+                                    panic!("edge {}:{} is used twice!", v, n1);
+                                }
+                            }
+
+                            if let Some(v) = v_of_new_t.get(&n1) {
+                                for &v in v {
+                                    new_v_of_t
+                                        .entry(additional_triangles.len())
+                                        .or_default()
+                                        .push(v);
+                                }
+                            }
+
+                            additional_triangles.push(Triangle(v, n1, n2));
+                            n1 = n2;
+                            n2 = next_v.get(&n1).copied().unwrap();
+                        }
+
+                        for &t in t {
+                            deleted_triangles[t] = true;
+                        }
+
+                        self.free_vertices.push(i);
+
+                        continue 'check_v;
+                    }
+
+                    for (_, c) in &mut control_v {
+                        *c = false;
+                    }
+                    v_of_new_t.clear();
                 }
             }
-        }
 
-        let result = !additional_triangles.is_empty();
+            let no_changes = additional_triangles.is_empty();
 
-        for i in 0..self.triangles.len() {
-            if !deleted_triangles[i] {
-                additional_triangles.push(self.triangles[i]);
+            // fix old triangle indices
+            for t in 0..self.triangles.len() {
+                if !deleted_triangles[t] {
+                    if let Some(v) = v_of_t.remove(&t) {
+                        new_v_of_t
+                            .entry(additional_triangles.len())
+                            .or_default()
+                            .extend(v);
+                    }
+                    additional_triangles.push(self.triangles[t]);
+                }
+            }
+
+            v_of_t = new_v_of_t;
+            self.triangles = additional_triangles;
+
+            for (&t, vs) in &v_of_t {
+                for &v in vs {
+                    if !self.v_near_t(v, self.triangles[t], width) {
+                        panic!("fail with v={}, t={}", v, t);
+                    }
+                }
+            }
+
+            if no_changes {
+                break;
             }
         }
-
-        self.triangles = additional_triangles;
-        result
     }
 
     pub fn delete_unused_v(&mut self) {
@@ -523,14 +662,22 @@ impl Model {
         }
 
         self.vertices = result;
+        self.free_vertices.clear();
     }
 
-    fn get_normal(&self, t: Triangle) -> Point {
+    pub fn get_normal(&self, t: Triangle) -> Point {
         cross(
             self.vertices[t.1] - self.vertices[t.0],
             self.vertices[t.2] - self.vertices[t.0],
         )
         .norm()
+    }
+
+    pub fn get_perp(&self, t: Triangle) -> Point {
+        cross(
+            self.vertices[t.1] - self.vertices[t.0],
+            self.vertices[t.2] - self.vertices[t.0],
+        )
     }
 
     /// panics if mesh is not closed
@@ -585,11 +732,11 @@ impl Model {
     pub fn split_by(self, t_to_i: &dyn Fn(usize) -> usize) -> Vec<Model> {
         #[derive(Default)]
         struct Mapping {
-            v: HashMap<usize, usize>, // vertex_id -> new_vertex_id
+            v: FxHashMap<usize, usize>, // vertex_id -> new_vertex_id
             m: Model,
         }
 
-        let mut mappings = HashMap::<usize, Mapping>::new(); // model_id -> mapping
+        let mut mappings = FxHashMap::<usize, Mapping>::default(); // model_id -> mapping
 
         for i in 0..self.triangles.len() {
             let ti = t_to_i(i);
@@ -626,19 +773,22 @@ impl Model {
 
     fn add_to_convex(triangles: &[Triangle], vertices: &[Point], vi: usize) -> Vec<Triangle> {
         // add_to_convex stuff
-        fn flip2(edges: &mut HashSet<(usize, usize)>, t0: usize, t1: usize) {
+        fn flip2(edges: &mut FxHashSet<(usize, usize)>, t0: usize, t1: usize) {
             if !edges.remove(&(t1, t0)) {
                 edges.insert((t0, t1));
             }
         }
 
-        fn flip3(edges: &mut HashSet<(usize, usize)>, t0: usize, t1: usize, t2: usize) {
+        fn flip3(edges: &mut FxHashSet<(usize, usize)>, t0: usize, t1: usize, t2: usize) {
             flip2(edges, t0, t1);
             flip2(edges, t1, t2);
             flip2(edges, t2, t0);
         }
 
-        fn validate(edges: &HashSet<(usize, usize)>, buffer: &mut HashMap<usize, usize>) -> bool {
+        fn validate(
+            edges: &FxHashSet<(usize, usize)>,
+            buffer: &mut FxHashMap<usize, usize>,
+        ) -> bool {
             buffer.clear();
 
             for &(v0, v1) in edges {
@@ -680,13 +830,13 @@ impl Model {
             split += 1;
         }
 
-        let mut edges = HashSet::<(usize, usize)>::new();
+        let mut edges = FxHashSet::<(usize, usize)>::default();
         for i in 0..split {
             let t = triangles[vols[i].1];
             flip3(&mut edges, t.2, t.1, t.0);
         }
 
-        let mut buffer = HashMap::<usize, usize>::new();
+        let mut buffer = FxHashMap::<usize, usize>::default();
 
         if !validate(&edges, &mut buffer) {
             assert!(split > 0);
@@ -808,6 +958,7 @@ impl Model {
         Some(Self {
             vertices: vertices.to_owned(),
             triangles,
+            free_vertices: Vec::new(),
         })
     }
 

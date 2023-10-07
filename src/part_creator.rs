@@ -132,7 +132,7 @@ impl PartCreator {
         }
     }
 
-    pub fn get_part_index(&self, pos: Point) -> u32 {
+    pub fn get_part_index(&self, pos: Point) -> PartIndex {
         let r = pos.len();
         if pos.x.abs() > 35.0 || pos.y.abs() > 35.0 || pos.z.abs() > 35.0 {
             return 0;
