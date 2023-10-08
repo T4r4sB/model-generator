@@ -393,7 +393,7 @@ impl Renderer {
             println!("usize={}", std::mem::size_of::<usize>());
 
             let start = std::time::Instant::now();
-            let mut mc = ModelCreator::new(512, 70.0, 10);
+            let mut mc = ModelCreator::new(256, 70.0, 10);
             let width = 0.05;
             while !mc.finished() {
                 mc.fill_next_layer(&part_func, width);
@@ -412,13 +412,13 @@ impl Renderer {
                 sum_v += m.vertices.len();
                 max_v = std::cmp::max(max_v, m.vertices.len());
                 m.validate_and_delete_small_groups();
-                let smooth_cnt = 10;
+                let smooth_cnt = 0;
                 for i in 0..smooth_cnt {
                     m.smooth(0.4);
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-                m.optimize(width, m_index, &part_func);
+                //m.optimize(width, m_index, &part_func);
                 println!("tcount after {}", m.triangles.len());
                 m.delete_unused_v();
                 //m.out_of_center(1.0);

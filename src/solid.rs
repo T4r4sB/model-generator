@@ -181,7 +181,7 @@ impl ModelCreator {
         let add_t = |model: &mut Model, v0: u32, v1: u32, v2: u32| {
             model
                 .triangles
-                .push(Triangle(v0 as usize, v1 as usize, v2 as usize));
+                .push(Triangle(v0, v1, v2));
         };
 
         let it = |model: &mut Model,

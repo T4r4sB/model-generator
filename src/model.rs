@@ -4,20 +4,21 @@ use rand::SeedableRng;
 use crate::points3d::*;
 use fxhash::{FxHashMap, FxHashSet};
 
+// use u32 because of memory optimization
 #[derive(Debug, Clone, Copy)]
-pub struct Triangle(pub usize, pub usize, pub usize);
+pub struct Triangle(pub u32, pub u32, pub u32);
 
 #[derive(Debug, Clone, Default)]
 pub struct Model {
     pub vertices: Vec<Point>,
     pub triangles: Vec<Triangle>,
-    free_vertices: Vec<usize>,
+    free_vertices: Vec<u32>,
 }
 
 #[derive(Debug, Default)]
 pub struct MeshTopology {
-    edge_to_face: FxHashMap<(usize, usize), (usize, usize)>,
-    face_adj: Vec<[usize; 3]>,
+    edge_to_face: FxHashMap<(u32, u32), (u32, u32)>,
+    face_adj: Vec<[u32; 3]>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -35,13 +36,13 @@ impl Model {
         }
     }
 
-    pub fn add_vertex(&mut self, p: Point) -> usize {
+    pub fn add_vertex(&mut self, p: Point) -> u32 {
         if let Some(i) = self.free_vertices.pop() {
-            self.vertices[i] = p;
+            self.vertices[i as usize] = p;
             return i;
         }
         self.vertices.push(p);
-        self.vertices.len() - 1
+        self.vertices.len() as u32 - 1
     }
 
     pub fn write_to_buffer(&self, buffer: &mut ArrayBuffer, color: u32) {
@@ -53,7 +54,7 @@ impl Model {
             self.vertices.len(),
             self.triangles.len()
         );
-        let old_v_len = buffer.v.len() / 6;
+        let old_v_len = (buffer.v.len() / 6) as u32;
 
         for v in &self.vertices {
             buffer.v.push(v.x);
@@ -64,9 +65,9 @@ impl Model {
             buffer.v.push((color & 0xff) as f32 / 255.0);
         }
         for t in &self.triangles {
-            buffer.i.push((old_v_len + t.0) as u32);
-            buffer.i.push((old_v_len + t.1) as u32);
-            buffer.i.push((old_v_len + t.2) as u32);
+            buffer.i.push(old_v_len + t.0);
+            buffer.i.push(old_v_len + t.1);
+            buffer.i.push(old_v_len + t.2);
         }
     }
 
@@ -75,12 +76,10 @@ impl Model {
             .reserve(self.triangles.len() + other.triangles.len());
         self.vertices
             .reserve(self.vertices.len() + other.vertices.len());
+        let shift = self.vertices.len() as u32;
         for t in other.triangles {
-            self.triangles.push(Triangle(
-                t.0 + self.vertices.len(),
-                t.1 + self.vertices.len(),
-                t.2 + self.vertices.len(),
-            ));
+            self.triangles
+                .push(Triangle(t.0 + shift, t.1 + shift, t.2 + shift));
         }
         for v in other.vertices {
             self.vertices.push(v);
@@ -90,15 +89,18 @@ impl Model {
     pub fn smooth(&mut self, delta: f32) {
         let mut positions = vec![(Point::zero(), 0); self.vertices.len()];
         for t in &self.triangles {
-            positions[t.0].0 += self.vertices[t.1];
-            positions[t.0].0 += self.vertices[t.2];
-            positions[t.0].1 += 2;
-            positions[t.1].0 += self.vertices[t.2];
-            positions[t.1].0 += self.vertices[t.0];
-            positions[t.1].1 += 2;
-            positions[t.2].0 += self.vertices[t.0];
-            positions[t.2].0 += self.vertices[t.1];
-            positions[t.2].1 += 2;
+            let t0 = t.0 as usize;
+            let t1 = t.1 as usize;
+            let t2 = t.2 as usize;
+            positions[t0].0 += self.vertices[t1];
+            positions[t0].0 += self.vertices[t2];
+            positions[t0].1 += 2;
+            positions[t1].0 += self.vertices[t2];
+            positions[t1].0 += self.vertices[t0];
+            positions[t1].1 += 2;
+            positions[t2].0 += self.vertices[t0];
+            positions[t2].0 += self.vertices[t1];
+            positions[t2].1 += 2;
         }
 
         for i in 0..self.vertices.len() {
@@ -108,8 +110,8 @@ impl Model {
     }
 
     pub fn get_topology(&self) -> MeshTopology {
-        let mut edge_to_face = FxHashMap::<(usize, usize), (usize, usize)>::default();
-        const BAD_INDEX: usize = usize::MAX;
+        let mut edge_to_face = FxHashMap::<(u32, u32), (u32, u32)>::default();
+        const BAD_INDEX: u32 = u32::MAX;
         let mut make_edge = |t, v1, v2| {
             if v1 < v2 {
                 let e = edge_to_face
@@ -138,9 +140,9 @@ impl Model {
 
         for i in 0..self.triangles.len() {
             let t = self.triangles[i];
-            make_edge(i, t.0, t.1);
-            make_edge(i, t.1, t.2);
-            make_edge(i, t.2, t.0);
+            make_edge(i as u32, t.0, t.1);
+            make_edge(i as u32, t.1, t.2);
+            make_edge(i as u32, t.2, t.0);
         }
 
         let mut bad = false;
@@ -155,10 +157,10 @@ impl Model {
             panic!("mesh is incomplete");
         }
 
-        let mut face_adj = Vec::<[usize; 3]>::new();
+        let mut face_adj = Vec::<[u32; 3]>::new();
         face_adj.resize(self.triangles.len(), [BAD_INDEX; 3]);
 
-        let use_edge = |dst: &mut usize, v1, v2| {
+        let use_edge = |dst: &mut u32, v1, v2| {
             if v1 < v2 {
                 *dst = edge_to_face.get(&(v1, v2)).unwrap().1;
             } else {
@@ -187,16 +189,15 @@ impl Model {
         let mut used_f = Vec::<bool>::new();
         used_f.resize(self.triangles.len(), false);
 
-        let mut control_edges: FxHashSet<(usize, usize)> =
-            top.edge_to_face.keys().copied().collect();
+        let mut control_edges: FxHashSet<(u32, u32)> = top.edge_to_face.keys().copied().collect();
         let mut result = 0;
 
         for (&e, &f) in &top.edge_to_face {
-            if used_f[f.0] || used_f[f.1] {
+            if used_f[f.0 as usize] || used_f[f.1 as usize] {
                 continue;
             }
 
-            fn opp_v(e: (usize, usize), t: Triangle) -> usize {
+            fn opp_v(e: (u32, u32), t: Triangle) -> u32 {
                 if e.0 == t.0 && e.1 == t.1 {
                     t.2
                 } else if e.0 == t.1 && e.1 == t.2 {
@@ -209,30 +210,30 @@ impl Model {
             }
 
             if dot(
-                self.get_normal(self.triangles[f.0]),
-                self.get_normal(self.triangles[f.1]),
+                self.get_normal(self.triangles[f.0 as usize]),
+                self.get_normal(self.triangles[f.1 as usize]),
             ) > 0.5
             {
                 continue;
             }
 
-            let e2 = opp_v(e, self.triangles[f.0]);
-            let e3 = opp_v((e.1, e.0), self.triangles[f.1]);
+            let e2 = opp_v(e, self.triangles[f.0 as usize]);
+            let e3 = opp_v((e.1, e.0), self.triangles[f.1 as usize]);
 
             let control_edge = if e2 < e3 { (e2, e3) } else { (e3, e2) };
             if control_edges.contains(&control_edge) {
                 continue;
             }
 
-            let v0 = self.vertices[e.0];
-            let v1 = self.vertices[e.1];
-            let v2 = self.vertices[e2];
-            let v3 = self.vertices[e3];
+            let v0 = self.vertices[e.0 as usize];
+            let v1 = self.vertices[e.1 as usize];
+            let v2 = self.vertices[e2 as usize];
+            let v3 = self.vertices[e3 as usize];
             let have_center = part_f((v0 + v1 + v2 + v3).scale(0.25)) == model_index;
             let pos = dot(v3 - v0, cross(v1 - v0, v2 - v0)) > 0.0;
             if have_center == pos {
-                used_f[f.0] = true;
-                used_f[f.1] = true;
+                used_f[f.0 as usize] = true;
+                used_f[f.1 as usize] = true;
                 new_triangles.push(Triangle(e.0, e3, e2));
                 new_triangles.push(Triangle(e.1, e2, e3));
                 control_edges.insert(control_edge);
@@ -249,131 +250,17 @@ impl Model {
         result
     }
 
-    pub fn double(
-        &mut self,
-        width: f32,
-        eps: f32,
-        model_index: u32,
-        part_f: &dyn Fn(Point) -> u32,
-        count: usize,
-        count_p: usize,
-    ) {
-        let top = self.get_topology();
-
-        let mut middles = FxHashMap::<(usize, usize), usize>::default();
-
-        for (&e, &f) in &top.edge_to_face {
-            let mut e0 = self.vertices[e.0];
-            let mut e1 = self.vertices[e.1];
-            let mut m_cur = (e0 + e1).scale(0.5);
-
-            let delta = self.get_normal(self.triangles[f.0]) + self.get_normal(self.triangles[f.1]);
-            let l = delta.len();
-            if l == 0.0 {
-            } else {
-                let delta = delta.scale(width / l);
-
-                let mut rm = find_root(part_f, m_cur - delta, m_cur + delta, model_index, count);
-                let mut dist = (rm - m_cur).sqr_len();
-
-                for _ in 0..count_p {
-                    let m1 = (e0 + m_cur).scale(0.5);
-                    let rm1 = find_root(part_f, m1 - delta, m1 + delta, model_index, count);
-                    let dist1 = (rm1 - m1).sqr_len();
-
-                    if dist1 > dist {
-                        e1 = m_cur;
-                        m_cur = m1;
-                        rm = rm1;
-                        dist = dist1;
-                        continue;
-                    }
-
-                    let m2 = (m_cur + e1).scale(0.5);
-                    let rm2 = find_root(part_f, m2 - delta, m2 + delta, model_index, count);
-                    let dist2 = (rm2 - m2).sqr_len();
-
-                    if dist2 > dist {
-                        e0 = m_cur;
-                        m_cur = m2;
-                        rm = rm2;
-                        dist = dist2;
-                        continue;
-                    }
-                }
-
-                if dist > eps {
-                    let nv = self.vertices.len();
-                    self.vertices.push(rm);
-                    middles.insert(e, nv);
-                    middles.insert((e.1, e.0), nv);
-                }
-            }
-        }
-
-        let mut new_triangles = Vec::<Triangle>::new();
-        for &t in &self.triangles {
-            let m0 = middles.get(&(t.1, t.2));
-            let m1 = middles.get(&(t.2, t.0));
-            let m2 = middles.get(&(t.0, t.1));
-
-            if let Some(&m0) = m0 {
-                if let Some(&m1) = m1 {
-                    if let Some(&m2) = m2 {
-                        new_triangles.push(Triangle(t.0, m2, m1));
-                        new_triangles.push(Triangle(m0, t.2, m1));
-                        new_triangles.push(Triangle(m0, m2, t.1));
-                        new_triangles.push(Triangle(m0, m1, m2));
-                    } else {
-                        new_triangles.push(Triangle(m1, m0, t.2));
-                        new_triangles.push(Triangle(m0, m1, t.0));
-                        new_triangles.push(Triangle(m0, t.0, t.1));
-                    }
-                } else {
-                    if let Some(&m2) = m2 {
-                        new_triangles.push(Triangle(m0, m2, t.1));
-                        new_triangles.push(Triangle(m2, m0, t.2));
-                        new_triangles.push(Triangle(m2, t.2, t.0));
-                    } else {
-                        new_triangles.push(Triangle(m0, t.0, t.1));
-                        new_triangles.push(Triangle(t.0, m0, t.2));
-                    }
-                }
-            } else {
-                if let Some(&m1) = m1 {
-                    if let Some(&m2) = m2 {
-                        new_triangles.push(Triangle(m2, m1, t.0));
-                        new_triangles.push(Triangle(m1, m2, t.1));
-                        new_triangles.push(Triangle(m1, t.1, t.2));
-                    } else {
-                        new_triangles.push(Triangle(m1, t.1, t.2));
-                        new_triangles.push(Triangle(t.1, m1, t.0));
-                    }
-                } else {
-                    if let Some(&m2) = m2 {
-                        new_triangles.push(Triangle(m2, t.2, t.0));
-                        new_triangles.push(Triangle(t.2, m2, t.1));
-                    } else {
-                        new_triangles.push(t);
-                    }
-                }
-            }
-        }
-
-        self.triangles = new_triangles;
-    }
-
-    pub fn v_near_t(&self, v_index: usize, t: Triangle, eps: f32) -> bool {
-        let v = self.vertices[v_index];
-        let v0 = v - self.vertices[t.0];
+    pub fn v_near_t(&self, v_index: u32, t: Triangle, eps: f32) -> bool {
+        let v = self.vertices[v_index as usize];
+        let v0 = v - self.vertices[t.0 as usize];
         let n = self.get_normal(t);
 
         if dot(v0, n).abs() > eps {
             return false;
         }
 
-        let v1 = v - self.vertices[t.1];
-        let v2 = v - self.vertices[t.2];
+        let v1 = v - self.vertices[t.1 as usize];
+        let v2 = v - self.vertices[t.2 as usize];
 
         let cr01 = cross(v0, v1);
         let cr12 = cross(v1, v2);
@@ -408,25 +295,29 @@ impl Model {
     }
 
     pub fn optimize(&mut self, width: f32, model_index: u32, f: &dyn Fn(Point) -> u32) {
-        let mut v_of_t = FxHashMap::<usize, Vec<usize>>::default();
+        let mut v_of_t = FxHashMap::<u32, Vec<u32>>::default();
 
         loop {
+            println!("optimization state; tcount={}", self.triangles.len());
             let mut deleted_triangles = Vec::<bool>::new();
             deleted_triangles.resize(self.triangles.len(), false);
 
-            let mut t_of_v = Vec::<Vec<usize>>::new();
+            let mut t_of_v = Vec::<Vec<u32>>::new();
             t_of_v.resize_with(self.vertices.len(), || Vec::new());
 
-            let mut edges = FxHashSet::<(usize, usize)>::default();
+            let mut edges = FxHashSet::<(u32, u32)>::default();
             let mut additional_triangles = Vec::<Triangle>::new();
 
-            let mut new_v_of_t = FxHashMap::<usize, Vec<usize>>::default();
+            let mut new_v_of_t = FxHashMap::<u32, Vec<u32>>::default();
 
             for i in 0..self.triangles.len() {
                 let t = self.triangles[i];
-                t_of_v[t.0].push(i);
-                t_of_v[t.1].push(i);
-                t_of_v[t.2].push(i);
+                let t0 = t.0 as usize;
+                let t1 = t.1 as usize;
+                let t2 = t.2 as usize;
+                t_of_v[t0].push(i as u32);
+                t_of_v[t1].push(i as u32);
+                t_of_v[t2].push(i as u32);
                 if !edges.insert((t.0, t.1)) {
                     panic!("edge {}:{} is used twice!", t.0, t.1);
                 }
@@ -448,26 +339,26 @@ impl Model {
 
             //let mut rng = rand::thread_rng();
             let mut rng = rand::rngs::StdRng::seed_from_u64(2);
-            let mut v_indices: Vec<usize> = (0..self.vertices.len())
+            let mut v_indices: Vec<u32> = (0..self.vertices.len() as u32)
                 .filter(|i| !border_v.contains(i))
                 .collect();
             v_indices.shuffle(&mut rng);
 
             'check_v: for i in v_indices {
-                let t = &t_of_v[i];
+                let t = &t_of_v[i as usize];
                 if t.is_empty() {
                     continue;
                 }
 
-                let mut next_v = FxHashMap::<usize, usize>::default();
+                let mut next_v = FxHashMap::<u32, u32>::default();
                 let mut normals = Vec::<Point>::new();
 
-                let mut control_v = FxHashMap::<usize, bool>::default();
-                let mut v_of_new_t = FxHashMap::<usize, Vec<usize>>::default();
+                let mut control_v = FxHashMap::<u32, bool>::default();
+                let mut v_of_new_t = FxHashMap::<u32, Vec<u32>>::default();
 
                 control_v.insert(i, false);
                 for &t in t {
-                    if deleted_triangles[t] {
+                    if deleted_triangles[t as usize] {
                         continue 'check_v;
                     }
 
@@ -477,28 +368,28 @@ impl Model {
                         }
                     }
 
-                    let t = self.triangles[t];
+                    let t = self.triangles[t as usize];
                     if t.0 == i {
                         if next_v.insert(t.1, t.2).is_some() {
                             println!("fail with {i}");
-                            for &t in &t_of_v[i] {
-                                println!("t={:?}", self.triangles[t]);
+                            for &t in &t_of_v[i as usize] {
+                                println!("t={:?}", self.triangles[t as usize]);
                             }
                             panic!("edge {}:{} is used before!", t.1, t.2);
                         }
                     } else if t.1 == i {
                         if next_v.insert(t.2, t.0).is_some() {
                             println!("fail with {i}");
-                            for &t in &t_of_v[i] {
-                                println!("t={:?}", self.triangles[t]);
+                            for &t in &t_of_v[i as usize] {
+                                println!("t={:?}", self.triangles[t as usize]);
                             }
                             panic!("edge {}:{} is used before!", t.2, t.0);
                         }
                     } else if t.2 == i {
                         if next_v.insert(t.0, t.1).is_some() {
                             println!("fail with {i}");
-                            for &t in &t_of_v[i] {
-                                println!("t={:?}", self.triangles[t]);
+                            for &t in &t_of_v[i as usize] {
+                                println!("t={:?}", self.triangles[t as usize]);
                             }
                             panic!("edge {}:{} is used before!", t.0, t.1);
                         }
@@ -512,11 +403,11 @@ impl Model {
                     let p_old = self.get_perp(old);
                     let l_new = p_new.len();
                     let l_old = p_old.len();
-                    dot(p_new, p_old) > 0.99 * l_new * l_old
+                    dot(p_new, p_old) > 0.9 * l_new * l_old
                 };
 
                 for (&v, &nv) in &next_v {
-                    let mut near_t = |t: Triangle, index: usize| {
+                    let mut near_t = |t: Triangle, index: u32| {
                         for (&i, c) in &mut control_v {
                             if *c {
                                 continue;
@@ -580,7 +471,7 @@ impl Model {
                             if let Some(v) = v_of_new_t.get(&n1) {
                                 for &v in v {
                                     new_v_of_t
-                                        .entry(additional_triangles.len())
+                                        .entry(additional_triangles.len() as u32)
                                         .or_default()
                                         .push(v);
                                 }
@@ -592,7 +483,7 @@ impl Model {
                         }
 
                         for &t in t {
-                            deleted_triangles[t] = true;
+                            deleted_triangles[t as usize] = true;
                         }
 
                         self.free_vertices.push(i);
@@ -612,9 +503,9 @@ impl Model {
             // fix old triangle indices
             for t in 0..self.triangles.len() {
                 if !deleted_triangles[t] {
-                    if let Some(v) = v_of_t.remove(&t) {
+                    if let Some(v) = v_of_t.remove(&(t as u32)) {
                         new_v_of_t
-                            .entry(additional_triangles.len())
+                            .entry(additional_triangles.len() as u32)
                             .or_default()
                             .extend(v);
                     }
@@ -627,7 +518,7 @@ impl Model {
 
             for (&t, vs) in &v_of_t {
                 for &v in vs {
-                    if !self.v_near_t(v, self.triangles[t], width) {
+                    if !self.v_near_t(v, self.triangles[t as usize], width) {
                         panic!("fail with v={}, t={}", v, t);
                     }
                 }
@@ -640,19 +531,19 @@ impl Model {
     }
 
     pub fn delete_unused_v(&mut self) {
-        const BAD_INDEX: usize = usize::MAX;
-        let mut mapping = Vec::<usize>::new();
-        mapping.resize(self.vertices.len(), usize::MAX);
+        const BAD_INDEX: u32 = u32::MAX;
+        let mut mapping = Vec::<u32>::new();
+        mapping.resize(self.vertices.len(), u32::MAX);
 
         let mut result = Vec::<Point>::new();
 
-        let mut use_v = |v: &mut usize| {
-            if mapping[*v] == BAD_INDEX {
-                mapping[*v] = result.len();
-                result.push(self.vertices[*v]);
+        let mut use_v = |v: &mut u32| {
+            if mapping[*v as usize] == BAD_INDEX {
+                mapping[*v as usize] = result.len() as u32;
+                result.push(self.vertices[*v as usize]);
             }
 
-            *v = mapping[*v];
+            *v = mapping[*v as usize];
         };
 
         for t in &mut self.triangles {
@@ -667,16 +558,16 @@ impl Model {
 
     pub fn get_normal(&self, t: Triangle) -> Point {
         cross(
-            self.vertices[t.1] - self.vertices[t.0],
-            self.vertices[t.2] - self.vertices[t.0],
+            self.vertices[t.1 as usize] - self.vertices[t.0 as usize],
+            self.vertices[t.2 as usize] - self.vertices[t.0 as usize],
         )
         .norm()
     }
 
     pub fn get_perp(&self, t: Triangle) -> Point {
         cross(
-            self.vertices[t.1] - self.vertices[t.0],
-            self.vertices[t.2] - self.vertices[t.0],
+            self.vertices[t.1 as usize] - self.vertices[t.0 as usize],
+            self.vertices[t.2 as usize] - self.vertices[t.0 as usize],
         )
     }
 
@@ -684,20 +575,20 @@ impl Model {
     pub fn validate_and_delete_small_groups(&mut self) {
         let topology = self.get_topology();
 
-        let mut face_group = Vec::<usize>::new();
+        let mut face_group = Vec::<u32>::new();
         face_group.resize(self.triangles.len(), 0);
 
-        let mut for_visit = Vec::<usize>::new();
+        let mut for_visit = Vec::<u32>::new();
         let mut last_group = 0;
 
         for i in 0..face_group.len() {
             if face_group[i] == 0 {
                 last_group += 1;
-                for_visit.push(i);
+                for_visit.push(i as u32);
                 while let Some(f) = for_visit.pop() {
-                    face_group[f] = last_group;
-                    for &f in &topology.face_adj[f] {
-                        if face_group[f] == 0 {
+                    face_group[f as usize] = last_group;
+                    for &f in &topology.face_adj[f as usize] {
+                        if face_group[f as usize] == 0 {
                             for_visit.push(f);
                         }
                     }
@@ -705,10 +596,10 @@ impl Model {
             }
         }
 
-        let mut counts = Vec::<usize>::new();
-        counts.resize(last_group, 0);
+        let mut counts = Vec::<u32>::new();
+        counts.resize(last_group as usize, 0);
         for f in &face_group {
-            counts[*f - 1] += 1;
+            counts[*f as usize - 1] += 1;
         }
 
         let mut max_c = 0;
@@ -722,32 +613,32 @@ impl Model {
 
         let mut new_t = Vec::new();
         for i in 0..self.triangles.len() {
-            if face_group[i] == max_index {
+            if face_group[i] as usize == max_index {
                 new_t.push(self.triangles[i]);
             }
         }
         self.triangles = new_t;
     }
 
-    pub fn split_by(self, t_to_i: &dyn Fn(usize) -> usize) -> Vec<Model> {
+    pub fn split_by(self, t_to_i: &dyn Fn(u32) -> u32) -> Vec<Model> {
         #[derive(Default)]
         struct Mapping {
-            v: FxHashMap<usize, usize>, // vertex_id -> new_vertex_id
+            v: FxHashMap<u32, u32>, // vertex_id -> new_vertex_id
             m: Model,
         }
 
-        let mut mappings = FxHashMap::<usize, Mapping>::default(); // model_id -> mapping
+        let mut mappings = FxHashMap::<u32, Mapping>::default(); // model_id -> mapping
 
         for i in 0..self.triangles.len() {
-            let ti = t_to_i(i);
+            let ti = t_to_i(i as u32);
             let mapping = mappings.entry(ti).or_default();
             let t = self.triangles[i];
 
             let mut use_mapping = |v| {
                 *mapping.v.entry(v).or_insert_with(|| {
                     let result = mapping.m.vertices.len();
-                    mapping.m.vertices.push(self.vertices[v]);
-                    result
+                    mapping.m.vertices.push(self.vertices[v as usize]);
+                    result as u32
                 })
             };
 
@@ -771,23 +662,23 @@ impl Model {
         }
     }
 
-    fn add_to_convex(triangles: &[Triangle], vertices: &[Point], vi: usize) -> Vec<Triangle> {
+    fn add_to_convex(triangles: &[Triangle], vertices: &[Point], vi: u32) -> Vec<Triangle> {
         // add_to_convex stuff
-        fn flip2(edges: &mut FxHashSet<(usize, usize)>, t0: usize, t1: usize) {
+        fn flip2(edges: &mut FxHashSet<(u32, u32)>, t0: u32, t1: u32) {
             if !edges.remove(&(t1, t0)) {
                 edges.insert((t0, t1));
             }
         }
 
-        fn flip3(edges: &mut FxHashSet<(usize, usize)>, t0: usize, t1: usize, t2: usize) {
+        fn flip3(edges: &mut FxHashSet<(u32, u32)>, t0: u32, t1: u32, t2: u32) {
             flip2(edges, t0, t1);
             flip2(edges, t1, t2);
             flip2(edges, t2, t0);
         }
 
         fn validate(
-            edges: &FxHashSet<(usize, usize)>,
-            buffer: &mut FxHashMap<usize, usize>,
+            edges: &FxHashSet<(u32, u32)>,
+            buffer: &mut FxHashMap<u32, u32>,
         ) -> bool {
             buffer.clear();
 
@@ -813,15 +704,18 @@ impl Model {
             return true;
         }
 
-        let mut vols = Vec::<(f32, usize)>::new();
+        let mut vols = Vec::<(f32, u32)>::new();
 
         for i in 0..triangles.len() {
             let t = triangles[i];
             let vol = dot(
-                vertices[vi] - vertices[t.0],
-                cross(vertices[t.1] - vertices[t.0], vertices[t.2] - vertices[t.0]),
+                vertices[vi as usize] - vertices[t.0 as usize],
+                cross(
+                    vertices[t.1 as usize] - vertices[t.0 as usize],
+                    vertices[t.2 as usize] - vertices[t.0 as usize],
+                ),
             );
-            vols.push((vol, i));
+            vols.push((vol, i as u32));
         }
 
         vols.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
@@ -830,13 +724,13 @@ impl Model {
             split += 1;
         }
 
-        let mut edges = FxHashSet::<(usize, usize)>::default();
+        let mut edges = FxHashSet::<(u32, u32)>::default();
         for i in 0..split {
-            let t = triangles[vols[i].1];
+            let t = triangles[vols[i].1 as usize];
             flip3(&mut edges, t.2, t.1, t.0);
         }
 
-        let mut buffer = FxHashMap::<usize, usize>::default();
+        let mut buffer = FxHashMap::<u32, u32>::default();
 
         if !validate(&edges, &mut buffer) {
             assert!(split > 0);
@@ -848,7 +742,7 @@ impl Model {
             let mut edges_up = edges.clone();
 
             loop {
-                let t = triangles[vols[s_down].1];
+                let t = triangles[vols[s_down].1 as usize];
                 // reversed
                 flip3(&mut edges, t.0, t.1, t.2);
                 if validate(&edges, &mut buffer) {
@@ -858,7 +752,7 @@ impl Model {
                 assert!(s_down > 0);
                 s_down -= 1;
 
-                let t = triangles[vols[s_up].1];
+                let t = triangles[vols[s_up].1 as usize];
                 flip3(&mut edges_up, t.2, t.1, t.0);
                 if validate(&edges_up, &mut buffer) {
                     split = s_up + 1;
@@ -871,7 +765,7 @@ impl Model {
         }
         let mut new_t = Vec::new();
         for i in 0..split {
-            new_t.push(triangles[vols[i].1]);
+            new_t.push(triangles[vols[i].1 as usize]);
         }
 
         for &(v0, v1) in &edges {
@@ -938,16 +832,16 @@ impl Model {
             std::mem::swap(&mut i2, &mut i3);
         }
 
-        result.push(Triangle(0, i1, i2));
-        result.push(Triangle(0, i2, i3));
-        result.push(Triangle(0, i3, i1));
-        result.push(Triangle(i3, i2, i1));
+        result.push(Triangle(0, i1 as u32, i2 as u32));
+        result.push(Triangle(0, i2 as u32, i3 as u32));
+        result.push(Triangle(0, i3 as u32, i1 as u32));
+        result.push(Triangle(i3 as u32, i2 as u32, i1 as u32));
 
         for i in 1..vertices.len() {
             if i == i1 || i == i2 || i == i3 {
                 continue;
             }
-            result = Self::add_to_convex(&result, vertices, i);
+            result = Self::add_to_convex(&result, vertices, i as u32);
         }
 
         Some(result)
@@ -972,9 +866,9 @@ impl Model {
         })?);
 
         let triangle_iter = self.triangles.iter().map(|t| {
-            let v0 = self.vertices[t.0];
-            let v1 = self.vertices[t.1];
-            let v2 = self.vertices[t.2];
+            let v0 = self.vertices[t.0 as usize];
+            let v1 = self.vertices[t.1 as usize];
+            let v2 = self.vertices[t.2 as usize];
             let n = cross(v1 - v0, v2 - v0).norm();
             let result = stl_io::Triangle {
                 normal: stl_io::Normal::new([n.x, n.y, n.z]),
