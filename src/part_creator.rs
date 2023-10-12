@@ -134,7 +134,7 @@ impl PartCreator {
 
     pub fn get_part_index(&self, pos: Point) -> PartIndex {
         let r = pos.len();
-        if pos.x.abs() > 35.0 || pos.y.abs() > 35.0 || pos.z.abs() > 35.0 {
+        if pos.x.abs() > 34.999 || pos.y.abs() > 34.999 || pos.z.abs() > 34.999 {
             return 0;
         }
         let wall = pos.x.abs() > 34.5 || pos.y.abs() > 34.5 || pos.z.abs() > 34.5;

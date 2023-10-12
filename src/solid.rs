@@ -15,14 +15,14 @@ pub struct SolidCell {
     v_zmz: u32,
     v_zzp: u32,
     v_zzm: u32,
-    v_ppz: u32,
-    v_mmz: u32,
-    v_pzp: u32,
-    v_mzm: u32,
-    v_zpp: u32,
-    v_zmm: u32,
-    v_ppp: u32,
     v_mmm: u32,
+    v_mmp: u32,
+    v_mpm: u32,
+    v_mpp: u32,
+    v_pmm: u32,
+    v_pmp: u32,
+    v_ppm: u32,
+    v_ppp: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -39,75 +39,69 @@ impl SolidCell {
             v_zmz: BAD_INDEX,
             v_zzp: BAD_INDEX,
             v_zzm: BAD_INDEX,
-            v_ppz: BAD_INDEX,
-            v_mmz: BAD_INDEX,
-            v_pzp: BAD_INDEX,
-            v_mzm: BAD_INDEX,
-            v_zpp: BAD_INDEX,
-            v_zmm: BAD_INDEX,
-            v_ppp: BAD_INDEX,
             v_mmm: BAD_INDEX,
+            v_mmp: BAD_INDEX,
+            v_mpm: BAD_INDEX,
+            v_mpp: BAD_INDEX,
+            v_pmm: BAD_INDEX,
+            v_pmp: BAD_INDEX,
+            v_ppm: BAD_INDEX,
+            v_ppp: BAD_INDEX,
         }
     }
 }
+#[derive(Default)]
 pub struct SolidLayer {
-    size: usize,
     cells: Vec<SolidCell>,
 }
 
 impl SolidLayer {
-    pub fn new_zero(size: usize, solid_size: f32, z: f32) -> Self {
-        let mut cells = vec![SolidCell::new(); (size + 1) * (size + 1)];
+    pub fn get_coord(size: usize, solid_size: f32, x: usize, odd: bool) -> f32 {
+        let scale = solid_size / (size as f32 - 1.5);
+        let shift = if odd {
+            -solid_size * 0.5
+        } else {
+            (-solid_size - scale) * 0.5
+        };
+        x as f32 * scale + shift
+    }
+
+    pub fn filled(
+        size: usize,
+        solid_size: f32,
+        z: f32,
+        odd: bool,
+        part_f: &dyn Fn(Point) -> PartIndex,
+    ) -> Self {
+        let mut cells = vec![SolidCell::new(); size * size];
         let mut idx = 0;
-        for y in 0..=size {
-            for x in 0..=size {
+
+        for y in 0..size {
+            for x in 0..size {
                 let pos = Point {
-                    x: (x as f32 / size as f32 - 0.5) * solid_size,
-                    y: (y as f32 / size as f32 - 0.5) * solid_size,
+                    x: Self::get_coord(size, solid_size, x, odd),
+                    y: Self::get_coord(size, solid_size, y, odd),
                     z,
                 };
-                cells[idx].index = 0;
+                cells[idx].index = part_f(pos);
                 cells[idx].pos = pos;
                 idx += 1;
             }
         }
 
-        Self { size, cells }
+        Self { cells }
     }
 
-    pub fn fill_by(&mut self, z: f32, part_f: &dyn Fn(Point) -> PartIndex) {
-        let mut idx = 0;
-        for y in 0..=self.size {
-            for x in 0..=self.size {
-                self.cells[idx].v_pzz = BAD_INDEX;
-                self.cells[idx].v_mzz = BAD_INDEX;
-                self.cells[idx].v_zpz = BAD_INDEX;
-                self.cells[idx].v_zmz = BAD_INDEX;
-                self.cells[idx].v_zzp = BAD_INDEX;
-                self.cells[idx].v_zzm = BAD_INDEX;
-                self.cells[idx].v_ppz = BAD_INDEX;
-                self.cells[idx].v_mmz = BAD_INDEX;
-                self.cells[idx].v_pzp = BAD_INDEX;
-                self.cells[idx].v_mzm = BAD_INDEX;
-                self.cells[idx].v_zpp = BAD_INDEX;
-                self.cells[idx].v_zmm = BAD_INDEX;
-                self.cells[idx].v_ppp = BAD_INDEX;
-                self.cells[idx].v_mmm = BAD_INDEX;
+    pub fn lift(&self, z: f32, part_f: &dyn Fn(Point) -> PartIndex) -> Self {
+        let mut cells = vec![SolidCell::new(); self.cells.len()];
 
-                self.cells[idx].pos.z = z;
-                if y == 0 || y == self.size || x == 0 || x == self.size {
-                    self.cells[idx].index = 0;
-                } else {
-                    self.cells[idx].index = part_f(self.cells[idx].pos);
-                }
-
-                idx += 1;
-            }
+        for i in 0..cells.len() {
+            cells[i].pos = self.cells[i].pos;
+            cells[i].pos.z = z;
+            cells[i].index = part_f(cells[i].pos);
         }
-    }
 
-    pub fn fill_zero(&mut self, z: f32) {
-        self.fill_by(z, &|_| 0);
+        Self { cells }
     }
 }
 
@@ -116,40 +110,56 @@ pub struct ModelCreator {
     solid_size: f32,
     models: HashMap<u32, Model>,
     prev_layer: SolidLayer,
+    cur_layer: SolidLayer,
     next_layer: SolidLayer,
     used_numbers: Vec<u32>,
     last_z: usize,
+    last_odd: bool,
     tries: usize,
 }
 
 impl ModelCreator {
-    pub fn new(size: usize, solid_size: f32, tries: usize) -> Self {
-        Self {
+    pub fn new(
+        size: usize,
+        solid_size: f32,
+        tries: usize,
+        part_f: &dyn Fn(Point) -> PartIndex,
+    ) -> Self {
+        let mut result = Self {
             size,
             solid_size,
             models: HashMap::new(),
-            prev_layer: SolidLayer::new_zero(size, solid_size, Self::first_z(solid_size)),
-            next_layer: SolidLayer::new_zero(size, solid_size, Self::first_z(solid_size)),
+            prev_layer: SolidLayer::default(),
+            cur_layer: SolidLayer::default(),
+            next_layer: SolidLayer::default(),
             used_numbers: Vec::new(),
             last_z: 0,
+            last_odd: true,
             tries,
-        }
+        };
+
+        result.cur_layer = result.filled_layer(0, false, part_f);
+        result.next_layer = result.filled_layer(0, true, part_f);
+
+        result
     }
 
     pub fn get_models(self) -> HashMap<u32, Model> {
         self.models
     }
 
-    fn first_z(solid_size: f32) -> f32 {
-        -0.5 * solid_size
-    }
-
-    fn count_z(&self) -> f32 {
-        (self.last_z as f32 / self.size as f32 - 0.5) * self.solid_size
+    fn filled_layer(&self, z: usize, odd: bool, part_f: &dyn Fn(Point) -> PartIndex) -> SolidLayer {
+        SolidLayer::filled(
+            self.size,
+            self.solid_size,
+            SolidLayer::get_coord(self.size, self.solid_size, z, odd),
+            odd,
+            part_f,
+        )
     }
 
     pub fn finished(&self) -> bool {
-        self.last_z == self.size
+        self.last_z == self.size - 1 && self.last_odd
     }
 
     fn fill_tetrahedron(
@@ -179,9 +189,7 @@ impl ModelCreator {
         };
 
         let add_t = |model: &mut Model, v0: u32, v1: u32, v2: u32| {
-            model
-                .triangles
-                .push(Triangle(v0, v1, v2));
+            model.triangles.push(Triangle(v0, v1, v2));
         };
 
         let it = |model: &mut Model,
@@ -248,21 +256,22 @@ impl ModelCreator {
                 *p3 = model.add_vertex(root(c0, c3)) as u32;
             }
 
-            let center = (model.vertices[*p0 as usize]
-                + model.vertices[*p1 as usize]
-                + model.vertices[*p2 as usize]
-                + model.vertices[*p3 as usize])
-                .scale(0.25);
+            let v0 = model.vertices[*p0 as usize];
+            let v1 = model.vertices[*p1 as usize];
+            let v2 = model.vertices[*p2 as usize];
+            let v3 = model.vertices[*p3 as usize];
+
+            let center = (v0 + v1 + v2 + v3).scale(0.25);
+            let vol_ok = dot(v1 - v0, cross(v2 - v0, v3 - v0)) > 0.0;
 
             let center_ok = part_f(center) == model_index;
 
-            
-            if center_ok {
+            if center_ok != vol_ok {
                 add_t(model, *p0, *p1, *p2);
-                add_t(model, *p0, *p2, *p3);
+                add_t(model, *p2, *p3, *p0);
             } else {
                 add_t(model, *p0, *p1, *p3);
-                add_t(model, *p3, *p1, *p2);
+                add_t(model, *p2, *p3, *p1);
             }
         };
 
@@ -345,23 +354,45 @@ impl ModelCreator {
 
     fn use_layers(&mut self, part_f: &dyn Fn(Point) -> u32) {
         let pl = self.prev_layer.cells.as_mut_slice();
+        let cl = self.cur_layer.cells.as_mut_slice();
         let nl = self.next_layer.cells.as_mut_slice();
 
-        for y in 0..self.size {
-            for x in 0..self.size {
-                let c = y * (self.size + 1) + x;
-                let cx = c + 1;
-                let cy = c + self.size + 1;
-                let cxy = c + self.size + 2;
-                let corner_index = pl[c].index;
+        let next_shift = self.last_odd as usize;
+        let cur_shift = 1 - next_shift;
 
-                if corner_index != pl[cx].index
-                    || corner_index != pl[cy].index
-                    || corner_index != pl[cxy].index
-                    || corner_index != nl[c].index
-                    || corner_index != nl[cx].index
-                    || corner_index != nl[cy].index
-                    || corner_index != nl[cxy].index
+        for y in 0..self.size - 1 {
+            for x in 0..self.size - 1 {
+                let c = y * self.size + x;
+                let cx = c + 1;
+                let cy = c + self.size;
+                let cxy = c + self.size + 1;
+                let npc = if self.last_odd { c } else { cxy };
+
+                let h1cur = if self.last_odd { cy } else { c };
+                let h2cur = h1cur + 1;
+                let v1next = if self.last_odd { c } else { cx };
+                let v2next = v1next + self.size;
+
+                let v1cur = if self.last_odd { cx } else { c };
+                let v2cur = v1cur + self.size;
+                let h1next = if self.last_odd { c } else { cy };
+                let h2next = h1next + 1;
+
+                let corner_index = pl[npc].index;
+
+                if corner_index != cl[c].index
+                    || corner_index != cl[cx].index
+                    || corner_index != cl[cy].index
+                    || corner_index != cl[cxy].index
+                    || corner_index != nl[npc].index
+                    || corner_index != cl[h1cur].index
+                    || corner_index != cl[h2cur].index
+                    || corner_index != cl[v1cur].index
+                    || corner_index != cl[v2cur].index
+                    || corner_index != nl[h1next].index
+                    || corner_index != nl[h2next].index
+                    || corner_index != nl[v1next].index
+                    || corner_index != nl[v2next].index
                 {
                     self.used_numbers.clear();
                     let mut use_number = |i| {
@@ -371,13 +402,19 @@ impl ModelCreator {
                     };
 
                     use_number(corner_index);
-                    use_number(pl[cx].index);
-                    use_number(pl[cy].index);
-                    use_number(pl[cxy].index);
-                    use_number(nl[c].index);
-                    use_number(nl[cx].index);
-                    use_number(nl[cy].index);
-                    use_number(nl[cxy].index);
+                    use_number(cl[c].index);
+                    use_number(cl[cx].index);
+                    use_number(cl[cy].index);
+                    use_number(cl[cxy].index);
+                    use_number(nl[npc].index);
+                    use_number(cl[h1cur].index);
+                    use_number(cl[h2cur].index);
+                    use_number(cl[v1cur].index);
+                    use_number(cl[v2cur].index);
+                    use_number(nl[h1next].index);
+                    use_number(nl[h2next].index);
+                    use_number(nl[v1next].index);
+                    use_number(nl[v2next].index);
 
                     for &model_index in &self.used_numbers {
                         let model = self.models.entry(model_index).or_insert(Model::new());
@@ -399,10 +436,10 @@ impl ModelCreator {
                             part_f,
                             self.tries,
                             model_index,
-                            vertex!(pl, c, v_pzz, v_ppz, v_ppp),
-                            vertex!(pl, cx, v_mzz, v_zpz, v_zpp),
-                            vertex!(pl, cxy, v_mmz, v_zmz, v_zzp),
-                            vertex!(nl, cxy, v_mmm, v_zmm, v_zzm),
+                            vertex!(pl, npc, v_mmp, v_pmp, v_zzp),
+                            vertex!(cl, c, v_ppm, v_pzz, v_ppp),
+                            vertex!(cl, cx, v_mpm, v_mzz, v_mpp),
+                            vertex!(nl, npc, v_zzm, v_mmm, v_pmm),
                         );
 
                         Self::fill_tetrahedron(
@@ -410,21 +447,10 @@ impl ModelCreator {
                             part_f,
                             self.tries,
                             model_index,
-                            vertex!(pl, c, v_zpz, v_zpp, v_ppp),
-                            vertex!(pl, cy, v_zmz, v_zzp, v_pzp),
-                            vertex!(nl, cy, v_zmm, v_zzm, v_pzz),
-                            vertex!(nl, cxy, v_mmm, v_mzm, v_mzz),
-                        );
-                        
-                        Self::fill_tetrahedron(
-                            model,
-                            part_f,
-                            self.tries,
-                            model_index,
-                            vertex!(pl, c, v_zzp, v_pzp, v_ppp),
-                            vertex!(nl, c, v_zzm, v_pzz, v_ppz),
-                            vertex!(nl, cx, v_mzm, v_mzz, v_zpz),
-                            vertex!(nl, cxy, v_mmm, v_mmz, v_zmz),
+                            vertex!(pl, npc, v_pmp, v_ppp, v_zzp),
+                            vertex!(cl, cx, v_mpm, v_zpz, v_mpp),
+                            vertex!(cl, cxy, v_mmm, v_zmz, v_mmp),
+                            vertex!(nl, npc, v_zzm, v_pmm, v_ppm),
                         );
 
                         Self::fill_tetrahedron(
@@ -432,10 +458,10 @@ impl ModelCreator {
                             part_f,
                             self.tries,
                             model_index,
-                            vertex!(pl, c, v_ppz, v_zpz, v_ppp),
-                            vertex!(pl, cxy, v_mmz, v_mzz, v_zzp),
-                            vertex!(pl, cy, v_zmz, v_pzz, v_pzp),
-                            vertex!(nl, cxy, v_mmm, v_zzm, v_mzm),
+                            vertex!(pl, npc, v_ppp, v_mpp, v_zzp),
+                            vertex!(cl, cxy, v_mmm, v_mzz, v_mmp),
+                            vertex!(cl, cy, v_pmm, v_pzz, v_pmp),
+                            vertex!(nl, npc, v_zzm, v_ppm, v_mpm),
                         );
 
                         Self::fill_tetrahedron(
@@ -443,10 +469,10 @@ impl ModelCreator {
                             part_f,
                             self.tries,
                             model_index,
-                            vertex!(pl, c, v_zpp, v_zzp, v_ppp),
-                            vertex!(nl, cy, v_zmm, v_zmz, v_pzz),
-                            vertex!(nl, c, v_zzm, v_zpz, v_ppz),
-                            vertex!(nl, cxy, v_mmm, v_mzz, v_mmz),
+                            vertex!(pl, npc, v_mpp, v_mmp, v_zzp),
+                            vertex!(cl, cy, v_pmm, v_zmz, v_pmp),
+                            vertex!(cl, c, v_ppm, v_zpz, v_ppp),
+                            vertex!(nl, npc, v_zzm, v_mpm, v_mmm),
                         );
 
                         Self::fill_tetrahedron(
@@ -454,10 +480,21 @@ impl ModelCreator {
                             part_f,
                             self.tries,
                             model_index,
-                            vertex!(pl, c, v_pzp, v_pzz, v_ppp),
-                            vertex!(nl, cx, v_mzm, v_zzm, v_zpz),
-                            vertex!(pl, cx, v_mzz, v_zzp, v_zpp),
-                            vertex!(nl, cxy, v_mmm, v_zmz, v_zmm),
+                            vertex!(cl, h1cur, v_pzz, v_ppp, v_pmp),
+                            vertex!(cl, h2cur, v_mzz, v_mpp, v_mmp),
+                            vertex!(nl, v2next, v_mmm, v_pmm, v_zmz),
+                            vertex!(nl, v1next, v_mpm, v_ppm, v_zpz),
+                        );
+
+                        Self::fill_tetrahedron(
+                            model,
+                            part_f,
+                            self.tries,
+                            model_index,
+                            vertex!(cl, v1cur, v_zpz, v_mpp, v_ppp),
+                            vertex!(cl, v2cur, v_zmz, v_mmp, v_pmp),
+                            vertex!(nl, h1next, v_pmm, v_ppm, v_pzz),
+                            vertex!(nl, h2next, v_mmm, v_mpm, v_mzz),
                         );
                     }
                 }
@@ -465,15 +502,18 @@ impl ModelCreator {
         }
     }
 
-    pub fn fill_next_layer(&mut self, part_f: &dyn Fn(Point) -> PartIndex, width: f32) {
-        std::mem::swap(&mut self.next_layer, &mut self.prev_layer);
-        self.last_z += 1;
-        let z = self.count_z();
-        if self.finished() {
-            self.next_layer.fill_zero(z);
+    pub fn fill_next_layer(&mut self, part_f: &dyn Fn(Point) -> PartIndex) {
+        self.prev_layer = std::mem::take(&mut self.cur_layer);
+        self.cur_layer = std::mem::take(&mut self.next_layer);
+        if self.last_odd {
+            self.last_odd = false;
+            self.last_z += 1;
         } else {
-            self.next_layer.fill_by(z, part_f);
+            self.last_odd = true;
         }
+
+        let z = SolidLayer::get_coord(self.size, self.solid_size, self.last_z, self.last_odd);
+        self.next_layer = self.prev_layer.lift(z, part_f);
         self.use_layers(part_f);
 
         println!("processed [{}/{}] layers", self.last_z, self.size);

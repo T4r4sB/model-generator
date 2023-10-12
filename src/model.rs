@@ -181,75 +181,6 @@ impl Model {
         }
     }
 
-    pub fn flip(&mut self, model_index: u32, part_f: &dyn Fn(Point) -> u32) -> usize {
-        let top = self.get_topology();
-
-        let mut new_triangles = Vec::<Triangle>::new();
-
-        let mut used_f = Vec::<bool>::new();
-        used_f.resize(self.triangles.len(), false);
-
-        let mut control_edges: FxHashSet<(u32, u32)> = top.edge_to_face.keys().copied().collect();
-        let mut result = 0;
-
-        for (&e, &f) in &top.edge_to_face {
-            if used_f[f.0 as usize] || used_f[f.1 as usize] {
-                continue;
-            }
-
-            fn opp_v(e: (u32, u32), t: Triangle) -> u32 {
-                if e.0 == t.0 && e.1 == t.1 {
-                    t.2
-                } else if e.0 == t.1 && e.1 == t.2 {
-                    t.0
-                } else if e.0 == t.2 && e.1 == t.0 {
-                    t.1
-                } else {
-                    panic!("edge {:?} is not from triangle {:?}", e, t)
-                }
-            }
-
-            if dot(
-                self.get_normal(self.triangles[f.0 as usize]),
-                self.get_normal(self.triangles[f.1 as usize]),
-            ) > 0.5
-            {
-                continue;
-            }
-
-            let e2 = opp_v(e, self.triangles[f.0 as usize]);
-            let e3 = opp_v((e.1, e.0), self.triangles[f.1 as usize]);
-
-            let control_edge = if e2 < e3 { (e2, e3) } else { (e3, e2) };
-            if control_edges.contains(&control_edge) {
-                continue;
-            }
-
-            let v0 = self.vertices[e.0 as usize];
-            let v1 = self.vertices[e.1 as usize];
-            let v2 = self.vertices[e2 as usize];
-            let v3 = self.vertices[e3 as usize];
-            let have_center = part_f((v0 + v1 + v2 + v3).scale(0.25)) == model_index;
-            let pos = dot(v3 - v0, cross(v1 - v0, v2 - v0)) > 0.0;
-            if have_center == pos {
-                used_f[f.0 as usize] = true;
-                used_f[f.1 as usize] = true;
-                new_triangles.push(Triangle(e.0, e3, e2));
-                new_triangles.push(Triangle(e.1, e2, e3));
-                control_edges.insert(control_edge);
-                result += 1;
-            }
-        }
-
-        for i in 0..used_f.len() {
-            if !used_f[i] {
-                new_triangles.push(self.triangles[i]);
-            }
-        }
-        self.triangles = new_triangles;
-        result
-    }
-
     pub fn v_near_t(&self, v_index: u32, t: Triangle, eps: f32) -> bool {
         let v = self.vertices[v_index as usize];
         let v0 = v - self.vertices[t.0 as usize];
@@ -294,7 +225,7 @@ impl Model {
         v0.sqr_len() < eps * eps || v1.sqr_len() < eps * eps || v2.sqr_len() < eps * eps
     }
 
-    pub fn optimize(&mut self, width: f32, model_index: u32, f: &dyn Fn(Point) -> u32) {
+    pub fn optimize(&mut self, width: f32) {
         let mut v_of_t = FxHashMap::<u32, Vec<u32>>::default();
 
         loop {

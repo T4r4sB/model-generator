@@ -382,21 +382,22 @@ impl Renderer {
             let part_creator = part_creator::PartCreator::new();
             let part_func = &|p| part_creator.get_part_index(p);
 
-            //let part_func = &|p: Point| (p.len() < 35.0) as u32;
+            //let part_func = &|p: Point| (p.len() < 35.0 ) as u32;
+            //let part_func = &|p: Point| (p.len() < 35.0 && p.len() > 20.0 && (p.y*p.y + p.z*p.z).sqrt() > 15.0) as u32;
 
             //let part_func =
             //    &|p: Point| (p.x.abs() < 35.0 && p.y.abs() < 35.0 && p.z.abs() < 35.0) as u32;
 
             //let part_func =
-            //    &|p: Point| (p.x.abs() < 35.0 && (p.y*p.y + p.z*p.z).sqrt() < 35.0) as u32;
+            //    &|p: Point| (p.x.abs() < 35.0 && (p.y*p.y + p.z*p.z).sqrt() > 15.0) as u32;
 
             println!("usize={}", std::mem::size_of::<usize>());
 
             let start = std::time::Instant::now();
-            let mut mc = ModelCreator::new(256, 70.0, 10);
+            let mut mc = ModelCreator::new(512, 70.0, 10, part_func);
             let width = 0.05;
             while !mc.finished() {
-                mc.fill_next_layer(&part_func, width);
+                mc.fill_next_layer(part_func);
             }
 
             let end_layers = std::time::Instant::now();
@@ -412,13 +413,13 @@ impl Renderer {
                 sum_v += m.vertices.len();
                 max_v = std::cmp::max(max_v, m.vertices.len());
                 m.validate_and_delete_small_groups();
-                let smooth_cnt = 0;
+                let smooth_cnt = 20;
                 for i in 0..smooth_cnt {
-                    m.smooth(0.4);
+                    m.smooth(0.1);
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-                //m.optimize(width, m_index, &part_func);
+                m.optimize(width);
                 println!("tcount after {}", m.triangles.len());
                 m.delete_unused_v();
                 //m.out_of_center(1.0);
