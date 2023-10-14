@@ -49,11 +49,12 @@ impl Model {
         buffer.v.reserve(buffer.v.len() + self.vertices.len() * 6);
         buffer.i.reserve(buffer.i.len() + self.triangles.len() * 3);
 
+        /*
         println!(
             "make flat model of {} v and {} t",
             self.vertices.len(),
             self.triangles.len()
-        );
+        );*/
         let old_v_len = (buffer.v.len() / 6) as u32;
 
         for v in &self.vertices {
@@ -153,7 +154,6 @@ impl Model {
             }
         }
         if bad {
-            println!("self.triangles={:?}", self.triangles);
             panic!("mesh is incomplete");
         }
 
@@ -225,9 +225,119 @@ impl Model {
         v0.sqr_len() < eps * eps || v1.sqr_len() < eps * eps || v2.sqr_len() < eps * eps
     }
 
-    pub fn optimize(&mut self, width: f32) {
+    pub fn optimize(&mut self, width: f32, group_dot: f32, min_group_size: u32, smooth_dot: f32) {
         let mut v_of_t = FxHashMap::<u32, Vec<u32>>::default();
 
+        let mut group_of_t = Vec::<u32>::new();
+        group_of_t.resize(self.triangles.len(), 0);
+        let mut group_counts = Vec::<u32>::new();
+        let top = self.get_topology();
+
+        for ti in 0..self.triangles.len() {
+            if group_of_t[ti] != 0 {
+                continue;
+            }
+
+            let mut stack = Vec::<u32>::new();
+            stack.push(ti as u32);
+            while let Some(cur_ti) = stack.pop() {
+                let cn = self.get_normal(self.triangles[ti]);
+                for new_ti in top.face_adj[cur_ti as usize] {
+                    if group_of_t[new_ti as usize] != 0 {
+                        continue;
+                    }
+
+                    let nn = self.get_normal(self.triangles[new_ti as usize]);
+                    if dot(nn, cn) <= group_dot {
+                        continue;
+                    }
+                    if group_of_t[ti] == 0 {
+                        group_counts.push(0);
+                        group_of_t[ti] = group_counts.len() as u32;
+                        *group_counts.last_mut().unwrap() += 1;
+                    }
+
+                    group_of_t[new_ti as usize] = group_counts.len() as u32;
+                    *group_counts.last_mut().unwrap() += 1;
+                    stack.push(new_ti);
+                }
+            }
+        }
+
+        for i in 0..group_of_t.len() {
+            if group_of_t[i] != 0 && group_counts[group_of_t[i] as usize - 1] < min_group_size {
+                group_of_t[i] = 0;
+            }
+        }
+
+        drop(top);
+
+        let mut mapping = FxHashMap::<Vec<u32>, u32>::default();
+        let mut g_of_v = Vec::<Vec<u32>>::new();
+        g_of_v.resize_with(self.vertices.len(), Default::default);
+
+        for i in 0..self.triangles.len() {
+            let t = self.triangles[i];
+            g_of_v[t.0 as usize].push(group_of_t[i]);
+            g_of_v[t.1 as usize].push(group_of_t[i]);
+            g_of_v[t.2 as usize].push(group_of_t[i]);
+        }
+
+        let gi_of_v: Vec<u32> = g_of_v
+            .iter_mut()
+            .map(|g| {
+                g.sort();
+                g.dedup();
+                let l = mapping.len();
+                *mapping.entry(g.clone()).or_insert(l as u32)
+            })
+            .collect();
+
+        fn is_subset(a: &[u32], b: &[u32]) -> bool {
+            let mut i = 0;
+            for &b in b {
+                if i == a.len() {
+                    return true;
+                }
+
+                if a[i] < b {
+                    return false;
+                }
+
+                if a[i] > b {
+                    continue;
+                }
+
+                if a[i] == b {
+                    i += 1;
+                }
+            }
+
+            i == a.len()
+        }
+
+        let mut subsets = Vec::<FxHashSet<u32>>::new();
+        subsets.resize_with(g_of_v.len(), Default::default);
+
+        println!("build inheritance...");
+        for (g1, &gi1) in &mapping {
+            for b in 0..=1 << g1.len() {
+                let mut g2 = Vec::new();
+                for i in 0..g1.len() {
+                    if ((b >> i) & 1) == 1 {
+                        g2.push(g1[i]);
+                    }
+                }
+                if let Some(&gi2) = mapping.get(&g2) {
+                    subsets[gi1 as usize].insert(gi2);
+                }
+            }
+        }
+        println!("/build inheritance...");
+        drop(mapping);
+        drop(g_of_v);
+
+        let mut suka_count = 0;
         loop {
             println!("optimization state; tcount={}", self.triangles.len());
             let mut deleted_triangles = Vec::<bool>::new();
@@ -329,12 +439,12 @@ impl Model {
                     normals.push(self.get_normal(t));
                 }
 
-                let validate = |new: Triangle, old: Triangle| -> bool {
+                let mut validate = |new: Triangle, old: Triangle| -> bool {
                     let p_new = self.get_perp(new);
                     let p_old = self.get_perp(old);
                     let l_new = p_new.len();
                     let l_old = p_old.len();
-                    dot(p_new, p_old) > 0.9 * l_new * l_old
+                    dot(p_new, p_old) > smooth_dot * l_new * l_old
                 };
 
                 for (&v, &nv) in &next_v {
@@ -350,6 +460,10 @@ impl Model {
                             }
                         }
                     };
+
+                    if !subsets[gi_of_v[v as usize] as usize].contains(&gi_of_v[i as usize]) {
+                        continue;
+                    }
 
                     let mut n1 = nv;
                     let mut n2 = next_v.get(&n1).copied().unwrap();
@@ -387,6 +501,7 @@ impl Model {
                     ok &= control_v.iter().all(|(_, &n)| n);
 
                     if ok {
+                        suka_count += 1;
                         let mut n1 = nv;
                         let mut n2 = next_v.get(&n1).copied().unwrap();
                         while n2 != v {
@@ -562,6 +677,9 @@ impl Model {
 
         for i in 0..self.triangles.len() {
             let ti = t_to_i(i as u32);
+            if ti == 0 {
+                continue;
+            }
             let mapping = mappings.entry(ti).or_default();
             let t = self.triangles[i];
 
@@ -607,10 +725,7 @@ impl Model {
             flip2(edges, t2, t0);
         }
 
-        fn validate(
-            edges: &FxHashSet<(u32, u32)>,
-            buffer: &mut FxHashMap<u32, u32>,
-        ) -> bool {
+        fn validate(edges: &FxHashSet<(u32, u32)>, buffer: &mut FxHashMap<u32, u32>) -> bool {
             buffer.clear();
 
             for &(v0, v1) in edges {

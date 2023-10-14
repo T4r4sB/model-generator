@@ -382,19 +382,19 @@ impl Renderer {
             let part_creator = part_creator::PartCreator::new();
             let part_func = &|p| part_creator.get_part_index(p);
 
-            //let part_func = &|p: Point| (p.len() < 35.0 ) as u32;
+            //let part_func = &|p: Point| ((p - Point{x: -0.0, y:0.0, z:0.0}).len() < 35.0 ) as u32;
             //let part_func = &|p: Point| (p.len() < 35.0 && p.len() > 20.0 && (p.y*p.y + p.z*p.z).sqrt() > 15.0) as u32;
 
             //let part_func =
-            //    &|p: Point| (p.x.abs() < 35.0 && p.y.abs() < 35.0 && p.z.abs() < 35.0) as u32;
+            //    &|p: Point| (p.x.abs() < 34.9 && p.y.abs() < 34.9 && p.z.abs() < 34.9) as u32;
 
             //let part_func =
-            //    &|p: Point| (p.x.abs() < 35.0 && (p.y*p.y + p.z*p.z).sqrt() > 15.0) as u32;
+            //    &|p: Point| (p.x.abs() < 34.999 && (p.y*p.y + p.z*p.z).sqrt() < 15.0) as u32;
 
             println!("usize={}", std::mem::size_of::<usize>());
 
             let start = std::time::Instant::now();
-            let mut mc = ModelCreator::new(512, 70.0, 10, part_func);
+            let mut mc = ModelCreator::new(64, 70.0, 20, part_func);
             let width = 0.05;
             while !mc.finished() {
                 mc.fill_next_layer(part_func);
@@ -409,17 +409,18 @@ impl Renderer {
             let mut sum_v_after = 0;
 
             let mut models = mc.get_models();
+           
             for (&m_index, m) in &mut models {
                 sum_v += m.vertices.len();
                 max_v = std::cmp::max(max_v, m.vertices.len());
                 m.validate_and_delete_small_groups();
-                let smooth_cnt = 20;
+                let smooth_cnt = 0;
                 for i in 0..smooth_cnt {
                     m.smooth(0.1);
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-                m.optimize(width);
+                //m.optimize(width, 0.9999, 10, 0.9);
                 println!("tcount after {}", m.triangles.len());
                 m.delete_unused_v();
                 //m.out_of_center(1.0);
@@ -454,7 +455,7 @@ impl Renderer {
 
             let mut array_buffer = ArrayBuffer::default();
             for (m_index, m) in &models {
-                m.write_to_buffer(&mut array_buffer, (m_index + 1).wrapping_mul(0x274381));
+                m.write_to_buffer(&mut array_buffer, (m_index + 1).wrapping_mul(0x274381) as u32);
             }
 
             println!("models written to big buffer");
