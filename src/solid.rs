@@ -193,6 +193,7 @@ pub struct ModelCreator {
     last_z: usize,
     last_odd: bool,
     tries: usize,
+    tries_t: usize,
 }
 
 impl ModelCreator {
@@ -200,6 +201,7 @@ impl ModelCreator {
         size: usize,
         solid_size: f32,
         tries: usize,
+        tries_t: usize,
         part_f: &dyn Fn(Point) -> PartIndex,
     ) -> Self {
         let mut result = Self {
@@ -213,6 +215,7 @@ impl ModelCreator {
             last_z: 0,
             last_odd: true,
             tries,
+            tries_t,
         };
 
         result.cur_layer = result.filled_layer(0, false, part_f);
@@ -243,6 +246,7 @@ impl ModelCreator {
         model: &mut Model,
         part_f: &dyn Fn(Point) -> u32,
         tries: usize,
+        tries_t: usize,
         model_index: PartIndex,
         (c0, c0_inside, e01, e02, e03, p012, p023, p031): (
             Point,
@@ -285,7 +289,7 @@ impl ModelCreator {
             &mut u32,
         ),
     ) {
-        let root = |mut p1: Point, mut p2: Point| {
+        let root = |mut p1: Point, mut p2: Point| -> Point {
             let mut i = 0;
             loop {
                 i += 1;
@@ -297,6 +301,45 @@ impl ModelCreator {
                     p1 = mid;
                 } else {
                     p2 = mid;
+                }
+            }
+        };
+
+        let root_t = |mut p1b: Point,
+                      mut p2b: Point,
+                      mut mb: Point,
+                      mut p1e: Point,
+                      mut p2e: Point,
+                      mut me: Point|
+         -> Point {
+            let mut p1m = (p1b + p1e).scale(0.5);
+            let mut p2m = (p2b + p2e).scale(0.5);
+
+            let mut i = 0;
+            loop {
+                i += 1;
+                let p1mb = (p1b + p1m).scale(0.5);
+                let p2mb = (p2b + p2m).scale(0.5);
+                let mb1 = root(p1mb, p2mb);
+                let p1me = (p1m + p1e).scale(0.5);
+                let p2me = (p2m + p2e).scale(0.5);
+                let me2 = root(p1me, p2me);
+                if cross(mb1 - mb, mb1 - me).sqr_len() > cross(me2 - mb, me2 - me).sqr_len() {
+                    if i >= tries_t {
+                        return mb1;
+                    }
+                    p1e = p1m;
+                    p1m = p1mb;
+                    p2e = p2m;
+                    p2m = p2mb;
+                } else {
+                    if i >= tries_t {
+                        return me2;
+                    }
+                    p1b = p1m;
+                    p1m = p1me;
+                    p2b = p2m;
+                    p2m = p2me;
                 }
             }
         };
@@ -317,22 +360,43 @@ impl ModelCreator {
                   e2: &mut u32,
                   p20: &mut u32| {
             if *e0 == BAD_INDEX {
-                *e0 = model.add_vertex(root(corner, c0)) as u32;
+                *e0 = model.add_vertex(root(corner, c0));
             }
             if *e1 == BAD_INDEX {
-                *e1 = model.add_vertex(root(corner, c1)) as u32;
+                *e1 = model.add_vertex(root(corner, c1));
             }
             if *e2 == BAD_INDEX {
-                *e2 = model.add_vertex(root(corner, c2)) as u32;
+                *e2 = model.add_vertex(root(corner, c2));
             }
             if *p01 == BAD_INDEX {
-                *p01 = model.add_vertex(root(corner, (c0 + c1).scale(0.5))) as u32;
+                *p01 = model.add_vertex(root_t(
+                    corner,
+                    c0,
+                    model.vertices[*e0 as usize],
+                    corner,
+                    c1,
+                    model.vertices[*e1 as usize],
+                ));
             }
             if *p12 == BAD_INDEX {
-                *p12 = model.add_vertex(root(corner, (c1 + c2).scale(0.5))) as u32;
+                *p12 = model.add_vertex(root_t(
+                    corner,
+                    c1,
+                    model.vertices[*e1 as usize],
+                    corner,
+                    c2,
+                    model.vertices[*e2 as usize],
+                ));
             }
             if *p20 == BAD_INDEX {
-                *p20 = model.add_vertex(root(corner, (c2 + c0).scale(0.5))) as u32;
+                *p20 = model.add_vertex(root_t(
+                    corner,
+                    c2,
+                    model.vertices[*e2 as usize],
+                    corner,
+                    c0,
+                    model.vertices[*e0 as usize],
+                ));
             }
 
             add_t(model, *e0, *p01, *p20);
@@ -353,22 +417,43 @@ impl ModelCreator {
                   e2: &mut u32,
                   p20: &mut u32| {
             if *e0 == BAD_INDEX {
-                *e0 = model.add_vertex(root(c0, corner)) as u32;
+                *e0 = model.add_vertex(root(c0, corner));
             }
             if *e1 == BAD_INDEX {
-                *e1 = model.add_vertex(root(c1, corner)) as u32;
+                *e1 = model.add_vertex(root(c1, corner));
             }
             if *e2 == BAD_INDEX {
-                *e2 = model.add_vertex(root(c2, corner)) as u32;
+                *e2 = model.add_vertex(root(c2, corner));
             }
             if *p01 == BAD_INDEX {
-                *p01 = model.add_vertex(root((c0 + c1).scale(0.5), corner)) as u32;
+                *p01 = model.add_vertex(root_t(
+                    c0,
+                    corner,
+                    model.vertices[*e0 as usize],
+                    c1,
+                    corner,
+                    model.vertices[*e1 as usize],
+                ));
             }
             if *p12 == BAD_INDEX {
-                *p12 = model.add_vertex(root((c1 + c2).scale(0.5), corner)) as u32;
+                *p12 = model.add_vertex(root_t(
+                    c1,
+                    corner,
+                    model.vertices[*e1 as usize],
+                    c2,
+                    corner,
+                    model.vertices[*e2 as usize],
+                ));
             }
             if *p20 == BAD_INDEX {
-                *p20 = model.add_vertex(root((c2 + c0).scale(0.5), corner)) as u32;
+                *p20 = model.add_vertex(root_t(
+                    c2,
+                    corner,
+                    model.vertices[*e2 as usize],
+                    c0,
+                    corner,
+                    model.vertices[*e0 as usize],
+                ));
             }
 
             add_t(model, *e0, *p01, *p20);
@@ -391,28 +476,56 @@ impl ModelCreator {
                  e3: &mut u32,
                  p30: &mut u32| {
             if *e0 == BAD_INDEX {
-                *e0 = model.add_vertex(root(c0, c1)) as u32;
+                *e0 = model.add_vertex(root(c0, c1));
             }
             if *e1 == BAD_INDEX {
-                *e1 = model.add_vertex(root(c2, c1)) as u32;
+                *e1 = model.add_vertex(root(c2, c1));
             }
             if *e2 == BAD_INDEX {
-                *e2 = model.add_vertex(root(c2, c3)) as u32;
+                *e2 = model.add_vertex(root(c2, c3));
             }
             if *e3 == BAD_INDEX {
-                *e3 = model.add_vertex(root(c0, c3)) as u32;
+                *e3 = model.add_vertex(root(c0, c3));
             }
             if *p01 == BAD_INDEX {
-                *p01 = model.add_vertex(root((c2 + c0).scale(0.5), c1)) as u32;
+                *p01 = model.add_vertex(root_t(
+                    c2,
+                    c1,
+                    model.vertices[*e1 as usize],
+                    c0,
+                    c1,
+                    model.vertices[*e0 as usize],
+                ));
             }
             if *p12 == BAD_INDEX {
-                *p12 = model.add_vertex(root(c2, (c1 + c3).scale(0.5))) as u32;
+                *p12 = model.add_vertex(root_t(
+                    c2,
+                    c1,
+                    model.vertices[*e1 as usize],
+                    c2,
+                    c3,
+                    model.vertices[*e2 as usize],
+                ));
             }
             if *p23 == BAD_INDEX {
-                *p23 = model.add_vertex(root((c2 + c0).scale(0.5), c3)) as u32;
+                *p23 = model.add_vertex(root_t(
+                    c2,
+                    c3,
+                    model.vertices[*e2 as usize],
+                    c0,
+                    c3,
+                    model.vertices[*e3 as usize],
+                ));
             }
             if *p30 == BAD_INDEX {
-                *p30 = model.add_vertex(root(c0, (c1 + c3).scale(0.5))) as u32;
+                *p30 = model.add_vertex(root_t(
+                    c0,
+                    c1,
+                    model.vertices[*e0 as usize],
+                    c0,
+                    c3,
+                    model.vertices[*e3 as usize],
+                ));
             }
 
             add_t(model, *e0, *p01, *p30);
@@ -446,36 +559,54 @@ impl ModelCreator {
                         // skip
                     } else {
                         // 012|3
-                        ot(model, c3, c0, e03, p301, c1, e13, p312, c2, e23, p320);
+                        ot(model, c3, c0, e03, p031, c1, e13, p123, c2, e23, p230);
+                        *p130 = *p031;
+                        *p213 = *p123;
+                        *p023 = *p230;
                     }
                 } else {
                     if c3_inside {
                         // 031|2
-                        ot(model, c2, c0, e02, p230, c3, e32, p213, c1, e12, p201);
+                        ot(model, c2, c0, e02, p320, c3, e32, p123, c1, e12, p012);
+                        *p023 = *p320;
+                        *p312 = *p123;
+                        *p102 = *p012;
                     } else {
                         // 01|23
                         q(
-                            model, c0, e03, p301, c3, e13, p123, c1, e12, p201, c2, e02, p023,
+                            model, c0, e03, p031, c3, e13, p123, c1, e12, p012, c2, e02, p023,
                         );
+
+                        *p130 = *p031;
+                        *p102 = *p012;
                     }
                 }
             } else {
                 if c2_inside {
                     if c3_inside {
                         // 023|1
-                        ot(model, c1, c0, e01, p102, c2, e21, p123, c3, e31, p130);
+                        ot(model, c1, c0, e01, p012, c2, e21, p213, c3, e31, p301);
+                        *p201 = *p012;
+                        *p312 = *p213;
+                        *p031 = *p301;
                     } else {
                         // 02|13
                         q(
-                            model, c0, e01, p102, c1, e21, p213, c2, e23, p320, c3, e03, p031,
+                            model, c0, e01, p012, c1, e21, p213, c2, e23, p230, c3, e03, p031,
                         );
+
+                        *p201 = *p012;
+                        *p023 = *p230;
                     }
                 } else {
                     if c3_inside {
                         // 03|12
                         q(
-                            model, c0, e02, p230, c2, e32, p312, c3, e31, p130, c1, e01, p012,
+                            model, c0, e02, p023, c2, e32, p312, c3, e31, p031, c1, e01, p012,
                         );
+
+                        *p320 = *p023;
+                        *p301 = *p031;
                     } else {
                         // 0|123
                         it(model, c0, c1, e01, p012, c2, e02, p023, c3, e03, p031);
@@ -487,19 +618,27 @@ impl ModelCreator {
                 if c2_inside {
                     if c3_inside {
                         // 132|0
-                        ot(model, c0, c1, e10, p031, c3, e30, p023, c2, e20, p012);
+                        ot(model, c0, c1, e10, p301, c3, e30, p230, c2, e20, p102);
+                        *p130 = *p301;
+                        *p320 = *p230;
+                        *p201 = *p102;
                     } else {
                         // 12|03
                         q(
-                            model, c1, e13, p312, c3, e23, p230, c2, e20, p012, c0, e10, p130,
+                            model, c1, e13, p123, c3, e23, p230, c2, e20, p102, c0, e10, p130,
                         );
+
+                        *p213 = *p123;
+                        *p201 = *p102;
                     }
                 } else {
                     if c3_inside {
                         // 13|02
                         q(
-                            model, c1, e10, p031, c0, e30, p320, c3, e32, p213, c2, e12, p102,
+                            model, c1, e10, p301, c0, e30, p320, c3, e32, p123, c2, e12, p102,
                         );
+                        *p130 = *p301;
+                        *p312 = *p123;
                     } else {
                         // 1|032
                         it(model, c1, c0, e10, p130, c3, e13, p123, c2, e12, p102);
@@ -510,8 +649,11 @@ impl ModelCreator {
                     if c3_inside {
                         // 23|01
                         q(
-                            model, c2, e21, p123, c1, e31, p301, c3, e30, p023, c0, e20, p201,
+                            model, c2, e21, p213, c1, e31, p301, c3, e30, p230, c0, e20, p201,
                         );
+
+                        *p312 = *p213;
+                        *p320 = *p230;
                     } else {
                         // 2|013
                         it(model, c2, c0, e20, p201, c1, e21, p213, c3, e23, p230);
@@ -614,6 +756,7 @@ impl ModelCreator {
                             model,
                             part_f,
                             self.tries,
+                            self.tries_t,
                             model_index,
                             vertex!(pl, npc, v_mmp, v_pmp, v_zzp, w_zmp, w_pmq, w_mmq),
                             vertex!(cl, c, v_ppm, v_pzz, v_ppp, w_qpm, w_qpp, w_ppz),
@@ -625,6 +768,7 @@ impl ModelCreator {
                             model,
                             part_f,
                             self.tries,
+                            self.tries_t,
                             model_index,
                             vertex!(pl, npc, v_pmp, v_ppp, v_zzp, w_pzp, w_ppq, w_pmq),
                             vertex!(cl, cx, v_mpm, v_zpz, v_mpp, w_mqm, w_mqp, w_mpz),
@@ -636,6 +780,7 @@ impl ModelCreator {
                             model,
                             part_f,
                             self.tries,
+                            self.tries_t,
                             model_index,
                             vertex!(pl, npc, v_ppp, v_mpp, v_zzp, w_zpp, w_mpq, w_ppq),
                             vertex!(cl, cxy, v_mmm, v_mzz, v_mmp, w_nmm, w_nmp, w_mmz),
@@ -647,6 +792,7 @@ impl ModelCreator {
                             model,
                             part_f,
                             self.tries,
+                            self.tries_t,
                             model_index,
                             vertex!(pl, npc, v_mpp, v_mmp, v_zzp, w_mzp, w_mmq, w_mpq),
                             vertex!(cl, cy, v_pmm, v_zmz, v_pmp, w_pnm, w_pnp, w_pmz),
@@ -658,6 +804,7 @@ impl ModelCreator {
                             model,
                             part_f,
                             self.tries,
+                            self.tries_t,
                             model_index,
                             vertex!(cl, h1cur, v_pzz, v_ppp, v_pmp, w_qpp, w_pzp, w_qmp),
                             vertex!(cl, h2cur, v_mzz, v_mpp, v_mmp, w_npp, w_mzp, w_nmp),
@@ -669,6 +816,7 @@ impl ModelCreator {
                             model,
                             part_f,
                             self.tries,
+                            self.tries_t,
                             model_index,
                             vertex!(cl, v1cur, v_zpz, v_mpp, v_ppp, w_mqp, w_zpp, w_pqp),
                             vertex!(cl, v2cur, v_zmz, v_mmp, v_pmp, w_mnp, w_zmp, w_pnp),
