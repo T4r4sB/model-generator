@@ -66,9 +66,6 @@ pub struct SolidCell {
     w_qpp: u32,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct SolidCellEdges {}
-
 impl SolidCell {
     pub fn new() -> Self {
         Self {
@@ -314,6 +311,9 @@ impl ModelCreator {
          -> Point {
             let mut p1m = (p1b + p1e).scale(0.5);
             let mut p2m = (p2b + p2e).scale(0.5);
+            if tries_t == 0 {
+                return root(p1m, p2m);
+            }
 
             let mut i = 0;
             loop {

@@ -28,9 +28,8 @@ mod model;
 use crate::model::*;
 mod solid;
 use crate::solid::*;
-mod bsp;
-use crate::bsp::*;
 mod part_creator;
+mod tree_creator;
 
 pub mod gl {
     #![allow(clippy::all)]
@@ -382,8 +381,11 @@ impl Renderer {
             gl.GenBuffers(1, &mut veo);
 
             let part_creator = part_creator::PartCreator::new();
+            let tree_creator = tree_creator::TreeCreator::new();
             let part_func = &|p| part_creator.get_part_index(p);
-
+            
+            //let part_func = &|p| tree_creator.get_part_index(p);
+            
             //let part_func = &|p: Point| ((p - Point{x: -0.0, y:0.0, z:0.0}).len() < 35.0 ) as u32;
             //let part_func = &|p: Point| (p.len() < 35.0 && p.len() > 20.0 && (p.y*p.y + p.z*p.z).sqrt() > 15.0) as u32;
 
@@ -396,7 +398,7 @@ impl Renderer {
             println!("usize={}", std::mem::size_of::<usize>());
 
             let start = std::time::Instant::now();
-            let mut mc = ModelCreator::new(512, 70.0, 20, 3, part_func);
+            let mut mc = ModelCreator::new(512, 130.0, 20, 0, part_func);
             let width = 0.05;
             while !mc.finished() {
                 mc.fill_next_layer(part_func);
@@ -422,7 +424,7 @@ impl Renderer {
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-                m.optimize(width, 0.9999, 1000, 0.9);
+                m.optimize(width, 0.99, 10, 0.9);
                 println!("tcount after {}", m.triangles.len());
                 m.delete_unused_v();
                 //m.out_of_center(1.0);
@@ -544,7 +546,7 @@ impl Renderer {
             let dt = (current_time - self.prev_time).as_secs_f32();
             self.prev_time = current_time;
 
-            let delta = dt * 10.0;
+            let delta = dt * 100.0;
 
             if self.input_state.forward {
                 self.camera_position.position += Point {
