@@ -1,6 +1,7 @@
 use crate::model::*;
 use crate::points3d::*;
 use crate::solid::*;
+use crate::Point2D;
 
 use std::cell::RefCell;
 
@@ -12,6 +13,7 @@ struct NearAxis {
 pub struct PartCreator {
     axis: Vec<Point>,
     normals: Vec<Point>,
+    n_basis: Vec<(Point, Point)>,
 
     p6: Point,
     p7: Point,
@@ -79,7 +81,7 @@ impl PartCreator {
                 x: (sqrt15 + sqrt3) / 6.0,
                 y: (sqrt15 - sqrt3) / 6.0,
                 z: 0.0,
-            }
+            },
         ];
 
         let p6 = Point {
@@ -147,6 +149,15 @@ impl PartCreator {
             (axis[4] + axis[5] + axis[6]).norm().scale(-0.92),
         ];
 
+        let n_basis = normals
+            .iter()
+            .map(|&n| {
+                let n1 = n.any_perp().norm();
+                let n2 = cross(n, n1).norm();
+                (n1, n2)
+            })
+            .collect();
+
         let cone_angle = 0.883;
         let screw_diam = 3.0;
         let head_diam = 5.6;
@@ -171,6 +182,7 @@ impl PartCreator {
         Self {
             axis,
             normals,
+            n_basis,
             p6,
             p7,
             p26_4,
@@ -190,18 +202,38 @@ impl PartCreator {
         }
     }
 
+    pub fn faces(&self) -> usize {
+        self.normals.len()
+    }
+
     pub fn get_part_index(&self, pos: Point) -> PartIndex {
+        self.get_part_index_impl(pos, self.normals.len())
+    }
+
+    pub fn get_sticker_index(&self, pos: Point2D, current_normal: usize) -> PartIndex {
+        let n = self.normals[current_normal];
+        let (n1, n2) = self.n_basis[current_normal];
+        let pos = n.scale(35.0 / n.sqr_len()) + n1.scale(pos.0) + n2.scale(pos.1);
+        let result = self.get_part_index_impl(pos, current_normal);
+        (result > 0) as PartIndex
+    }
+
+    pub fn get_part_index_impl(&self, pos: Point, current_normal: usize) -> PartIndex {
         let r = pos.len();
         if pos.x.abs() > 64.999 || pos.y.abs() > 64.999 || pos.z.abs() > 64.999 {
             return 0;
         }
 
+        let sticker = current_normal < self.normals.len();
+
         let mut wall = false;
         let mut cup = false;
         let mut core = true;
-        for &n in &self.normals {
+        for i in 0..self.normals.len() {
+            let n = self.normals[i];
             let d = dot(n, pos);
-            if d > 34.999 {
+            let center_dist = if sticker { 33.999 } else { 34.999 };
+            if i != current_normal && d > center_dist {
                 return 0;
             }
             if d > 33.5 {
@@ -317,6 +349,13 @@ impl PartCreator {
                 } else {
                 }
 
+                let mut curvyness = 16.0;
+                if sticker {
+                    cone_angle += 0.02;
+                    cone_angle_in -= 0.02;
+                    curvyness = 24.0;
+                }
+
                 let p1 = a.any_perp().norm();
                 let p2 = cross(a, p1);
                 let spiral_a = f32::atan2(dot(pos, p1), dot(pos, p2)) / std::f32::consts::PI;
@@ -324,7 +363,6 @@ impl PartCreator {
                 if dot(pos, a) > 0.0 {
                     let sin = cross(pos, a).len() / r;
                     if sin < cone_angle_in {
-                        let curvyness = 16.0;
                         let d = 1.0 - (cone_angle_in - sin) * curvyness;
                         if d > 0.0 {
                             axis_pos.push(NearAxis { dist: d, pos: a });
@@ -339,7 +377,6 @@ impl PartCreator {
                             return 0;
                         }
                     } else if sin > cone_angle {
-                        let curvyness = 16.0;
                         let d = 1.0 - (sin - cone_angle) * curvyness;
                         if d > 0.0 {
                             axis_neg.push(NearAxis { dist: d, pos: a });
@@ -361,7 +398,7 @@ impl PartCreator {
             };
         }
 
-        for i in 0..self.axis.len()-1 {
+        for i in 0..self.axis.len() - 1 {
             match_axis!(pos, self.axis[i], self.cone_angle, i);
         }
 

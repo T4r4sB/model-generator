@@ -49,12 +49,6 @@ impl Model {
         buffer.v.reserve(buffer.v.len() + self.vertices.len() * 6);
         buffer.i.reserve(buffer.i.len() + self.triangles.len() * 3);
 
-        /*
-        println!(
-            "make flat model of {} v and {} t",
-            self.vertices.len(),
-            self.triangles.len()
-        );*/
         let old_v_len = (buffer.v.len() / 6) as u32;
 
         for v in &self.vertices {
@@ -934,9 +928,7 @@ impl Model {
                 path.to_string_lossy(),
                 e
             )
-        })?;
-
-        Ok(())
+        })
     }
 }
 

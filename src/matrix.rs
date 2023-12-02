@@ -60,8 +60,11 @@ impl Matrix {
         }
     }
 
-    pub fn new_view(pos: Point, angle_y: f32,angle_x: f32) -> Self {
-        mat_mul(Self::translated(pos), mat_mul(Self::rotated_y(angle_y), Self::rotated_x(angle_x)))
+    pub fn new_view(pos: Point, angle_y: f32, angle_x: f32) -> Self {
+        mat_mul(
+            Self::translated(pos),
+            mat_mul(Self::rotated_y(angle_y), Self::rotated_x(angle_x)),
+        )
     }
 
     pub fn as_ptr(&self) -> *const f32 {

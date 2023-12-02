@@ -182,11 +182,11 @@ impl SolidLayer {
 pub struct ModelCreator {
     size: usize,
     solid_size: f32,
-    models: HashMap<u32, Model>,
+    models: HashMap<PartIndex, Model>,
     prev_layer: SolidLayer,
     cur_layer: SolidLayer,
     next_layer: SolidLayer,
-    used_numbers: Vec<u32>,
+    used_numbers: Vec<PartIndex>,
     last_z: usize,
     last_odd: bool,
     tries: usize,
@@ -221,7 +221,7 @@ impl ModelCreator {
         result
     }
 
-    pub fn get_models(self) -> HashMap<u32, Model> {
+    pub fn get_models(self) -> HashMap<PartIndex, Model> {
         self.models
     }
 
@@ -241,7 +241,7 @@ impl ModelCreator {
 
     fn fill_tetrahedron(
         model: &mut Model,
-        part_f: &dyn Fn(Point) -> u32,
+        part_f: &dyn Fn(Point) -> PartIndex,
         tries: usize,
         tries_t: usize,
         model_index: PartIndex,
@@ -670,13 +670,15 @@ impl ModelCreator {
         }
     }
 
-    fn use_layers(&mut self, part_f: &dyn Fn(Point) -> u32) {
+    fn use_layers(&mut self, part_f: &dyn Fn(Point) -> PartIndex) {
+        if self.size == 0 {
+            return;
+        }
         let pl = self.prev_layer.cells.as_mut_slice();
         let cl = self.cur_layer.cells.as_mut_slice();
         let nl = self.next_layer.cells.as_mut_slice();
 
         let next_shift = self.last_odd as usize;
-        let cur_shift = 1 - next_shift;
 
         for y in 0..self.size - 1 {
             for x in 0..self.size - 1 {

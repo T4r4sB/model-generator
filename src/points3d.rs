@@ -35,7 +35,7 @@ impl Point {
     }
 
     pub fn any_perp(self) -> Self {
-        if self.x < self.y && self.x < self.z {
+        if self.x.abs() < self.y.abs() && self.x.abs() < self.z.abs() {
             return Self {
                 x: 0.0,
                 y: self.z,
@@ -43,7 +43,7 @@ impl Point {
             };
         }
 
-        if self.y < self.z {
+        if self.y.abs() < self.z.abs() {
             return Self {
                 x: -self.z,
                 y: 0.0,

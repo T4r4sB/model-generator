@@ -28,6 +28,8 @@ mod model;
 use crate::model::*;
 mod solid;
 use crate::solid::*;
+mod contour;
+use crate::contour::*;
 mod part_creator;
 mod tree_creator;
 
@@ -321,7 +323,6 @@ impl Renderer {
             if let Some(version) = get_gl_string(&gl, gl::VERSION) {
                 println!("OpenGL Version {}", version.to_string_lossy());
             }
-
             if let Some(shaders_version) = get_gl_string(&gl, gl::SHADING_LANGUAGE_VERSION) {
                 println!("Shaders version on {}", shaders_version.to_string_lossy());
             }
@@ -383,10 +384,9 @@ impl Renderer {
             let part_creator = part_creator::PartCreator::new();
             let tree_creator = tree_creator::TreeCreator::new();
             let part_func = &|p| part_creator.get_part_index(p);
-            
+
             //let part_func = &|p| tree_creator.get_part_index(p);
-            
-            //let part_func = &|p: Point| ((p - Point{x: -0.0, y:0.0, z:0.0}).len() < 35.0 ) as u32;
+            //let part_func = &|p: Point| (p.len() < 35.0) as u32;
             //let part_func = &|p: Point| (p.len() < 35.0 && p.len() > 20.0 && (p.y*p.y + p.z*p.z).sqrt() > 15.0) as u32;
 
             //let part_func =
@@ -395,9 +395,37 @@ impl Renderer {
             //let part_func =
             //    &|p: Point| (p.x.abs() < 34.999 && (p.y*p.y + p.z*p.z).sqrt() < 15.0) as u32;
 
-            println!("usize={}", std::mem::size_of::<usize>());
-
             let start = std::time::Instant::now();
+            let mut cc = ContourCreator::new(512, 320.0, 20);
+
+            for i in 0..part_creator.faces() {
+                let mut contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
+
+                if i == 0 {
+                    let mut contours2 = cc.make_contour(&|p| {
+                        part_creator.get_sticker_index(p, part_creator.faces() - 1)
+                    });
+
+                    contours2.get_mut(&1).unwrap().shift(Point2D(20.0, 0.0));
+                    contours
+                        .get_mut(&1)
+                        .unwrap()
+                        .merge(contours2.remove(&1).unwrap());
+                }
+
+                for (index, cc) in &mut contours {
+                    for _ in 0..5 {
+                        cc.smooth();
+                    }
+                    println!("save {i}:{index} ({} points) to dxf...", cc.points_count());
+                    if let Err(msg) =
+                        cc.save_to_dxf(std::path::Path::new(&format!("contour_{i}_{index}.dxf")))
+                    {
+                        println!("{}", msg);
+                    }
+                }
+            }
+
             let mut mc = ModelCreator::new(512, 130.0, 20, 0, part_func);
             let width = 0.05;
             while !mc.finished() {
@@ -413,7 +441,7 @@ impl Renderer {
             let mut sum_v_after = 0;
 
             let mut models = mc.get_models();
-           
+
             for (&m_index, m) in &mut models {
                 sum_v += m.vertices.len();
                 max_v = std::cmp::max(max_v, m.vertices.len());
@@ -459,7 +487,10 @@ impl Renderer {
 
             let mut array_buffer = ArrayBuffer::default();
             for (m_index, m) in &models {
-                m.write_to_buffer(&mut array_buffer, (m_index + 1).wrapping_mul(0x274381) as u32);
+                m.write_to_buffer(
+                    &mut array_buffer,
+                    (m_index + 1).wrapping_mul(0x274381) as u32,
+                );
             }
 
             println!("models written to big buffer");
