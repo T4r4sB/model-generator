@@ -286,22 +286,6 @@ impl ModelCreator {
             &mut u32,
         ),
     ) {
-        let root = |mut p1: Point, mut p2: Point| -> Point {
-            let mut i = 0;
-            loop {
-                i += 1;
-                let mid = (p1 + p2).scale(0.5);
-                if i >= tries {
-                    return mid;
-                }
-                if part_f(mid) == model_index {
-                    p1 = mid;
-                } else {
-                    p2 = mid;
-                }
-            }
-        };
-
         let root_t = |mut p1b: Point,
                       mut p2b: Point,
                       mut mb: Point,
@@ -312,7 +296,7 @@ impl ModelCreator {
             let mut p1m = (p1b + p1e).scale(0.5);
             let mut p2m = (p2b + p2e).scale(0.5);
             if tries_t == 0 {
-                return root(p1m, p2m);
+                return find_root(part_f, p1m, p2m, model_index, tries);
             }
 
             let mut i = 0;
@@ -320,10 +304,10 @@ impl ModelCreator {
                 i += 1;
                 let p1mb = (p1b + p1m).scale(0.5);
                 let p2mb = (p2b + p2m).scale(0.5);
-                let mb1 = root(p1mb, p2mb);
+                let mb1 = find_root(part_f, p1mb, p2mb, model_index, tries);
                 let p1me = (p1m + p1e).scale(0.5);
                 let p2me = (p2m + p2e).scale(0.5);
-                let me2 = root(p1me, p2me);
+                let me2 = find_root(part_f, p1me, p2me, model_index, tries);
                 if cross(mb1 - mb, mb1 - me).sqr_len() > cross(me2 - mb, me2 - me).sqr_len() {
                     if i >= tries_t {
                         return mb1;
@@ -360,13 +344,13 @@ impl ModelCreator {
                   e2: &mut u32,
                   p20: &mut u32| {
             if *e0 == BAD_INDEX {
-                *e0 = model.add_vertex(root(corner, c0));
+                *e0 = model.add_vertex(find_root(part_f, corner, c0, model_index, tries));
             }
             if *e1 == BAD_INDEX {
-                *e1 = model.add_vertex(root(corner, c1));
+                *e1 = model.add_vertex(find_root(part_f, corner, c1, model_index, tries));
             }
             if *e2 == BAD_INDEX {
-                *e2 = model.add_vertex(root(corner, c2));
+                *e2 = model.add_vertex(find_root(part_f, corner, c2, model_index, tries));
             }
             if *p01 == BAD_INDEX {
                 *p01 = model.add_vertex(root_t(
@@ -417,13 +401,13 @@ impl ModelCreator {
                   e2: &mut u32,
                   p20: &mut u32| {
             if *e0 == BAD_INDEX {
-                *e0 = model.add_vertex(root(c0, corner));
+                *e0 = model.add_vertex(find_root(part_f, c0, corner, model_index, tries));
             }
             if *e1 == BAD_INDEX {
-                *e1 = model.add_vertex(root(c1, corner));
+                *e1 = model.add_vertex(find_root(part_f, c1, corner, model_index, tries));
             }
             if *e2 == BAD_INDEX {
-                *e2 = model.add_vertex(root(c2, corner));
+                *e2 = model.add_vertex(find_root(part_f, c2, corner, model_index, tries));
             }
             if *p01 == BAD_INDEX {
                 *p01 = model.add_vertex(root_t(
@@ -476,16 +460,16 @@ impl ModelCreator {
                  e3: &mut u32,
                  p30: &mut u32| {
             if *e0 == BAD_INDEX {
-                *e0 = model.add_vertex(root(c0, c1));
+                *e0 = model.add_vertex(find_root(part_f, c0, c1, model_index, tries));
             }
             if *e1 == BAD_INDEX {
-                *e1 = model.add_vertex(root(c2, c1));
+                *e1 = model.add_vertex(find_root(part_f, c2, c1, model_index, tries));
             }
             if *e2 == BAD_INDEX {
-                *e2 = model.add_vertex(root(c2, c3));
+                *e2 = model.add_vertex(find_root(part_f, c2, c3, model_index, tries));
             }
             if *e3 == BAD_INDEX {
-                *e3 = model.add_vertex(root(c0, c3));
+                *e3 = model.add_vertex(find_root(part_f, c0, c3, model_index, tries));
             }
             if *p01 == BAD_INDEX {
                 *p01 = model.add_vertex(root_t(

@@ -7,11 +7,7 @@ pub struct Point {
 
 impl Point {
     pub fn zero() -> Self {
-        Self {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }
+        Self { x: 0.0, y: 0.0, z: 0.0 }
     }
 
     pub fn sqr_len(self) -> f32 {
@@ -23,11 +19,7 @@ impl Point {
     }
 
     pub fn scale(self, factor: f32) -> Self {
-        Self {
-            x: self.x * factor,
-            y: self.y * factor,
-            z: self.z * factor,
-        }
+        Self { x: self.x * factor, y: self.y * factor, z: self.z * factor }
     }
 
     pub fn norm(self) -> Self {
@@ -36,26 +28,14 @@ impl Point {
 
     pub fn any_perp(self) -> Self {
         if self.x.abs() < self.y.abs() && self.x.abs() < self.z.abs() {
-            return Self {
-                x: 0.0,
-                y: self.z,
-                z: -self.y,
-            };
+            return Self { x: 0.0, y: self.z, z: -self.y };
         }
 
         if self.y.abs() < self.z.abs() {
-            return Self {
-                x: -self.z,
-                y: 0.0,
-                z: self.x,
-            };
+            return Self { x: -self.z, y: 0.0, z: self.x };
         }
 
-        Self {
-            x: self.y,
-            y: -self.x,
-            z: 0.0,
-        }
+        Self { x: self.y, y: -self.x, z: 0.0 }
     }
 }
 
@@ -63,11 +43,7 @@ impl std::ops::Add for Point {
     type Output = Point;
 
     fn add(self, rhs: Point) -> Point {
-        Point {
-            x: self.x + rhs.x,
-            y: self.y + rhs.y,
-            z: self.z + rhs.z,
-        }
+        Point { x: self.x + rhs.x, y: self.y + rhs.y, z: self.z + rhs.z }
     }
 }
 
@@ -83,11 +59,7 @@ impl std::ops::Sub for Point {
     type Output = Point;
 
     fn sub(self, rhs: Point) -> Point {
-        Point {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-            z: self.z - rhs.z,
-        }
+        Point { x: self.x - rhs.x, y: self.y - rhs.y, z: self.z - rhs.z }
     }
 }
 
@@ -96,6 +68,14 @@ impl std::ops::SubAssign for Point {
         self.x -= rhs.x;
         self.y -= rhs.y;
         self.z -= rhs.z;
+    }
+}
+
+impl std::ops::Neg for Point {
+    type Output = Point;
+
+    fn neg(self) -> Point {
+        Point { x: -self.x, y: -self.y, z: -self.z }
     }
 }
 

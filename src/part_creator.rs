@@ -1,7 +1,6 @@
 use crate::model::*;
 use crate::points3d::*;
 use crate::solid::*;
-use crate::Point2D;
 
 use std::cell::RefCell;
 
@@ -47,53 +46,17 @@ impl PartCreator {
         let sqrt15 = 15.0f32.sqrt();
 
         let axis = vec![
-            Point {
-                x: -sqrt3 / 3.0,
-                y: -sqrt3 / 3.0,
-                z: -sqrt3 / 3.0,
-            },
-            Point {
-                x: -sqrt3 / 3.0,
-                y: -sqrt3 / 3.0,
-                z: sqrt3 / 3.0,
-            },
-            Point {
-                x: -sqrt3 / 3.0,
-                y: sqrt3 / 3.0,
-                z: -sqrt3 / 3.0,
-            },
-            Point {
-                x: -sqrt3 / 3.0,
-                y: sqrt3 / 3.0,
-                z: sqrt3 / 3.0,
-            },
-            Point {
-                x: sqrt3 / 3.0,
-                y: -sqrt3 / 3.0,
-                z: -sqrt3 / 3.0,
-            },
-            Point {
-                x: sqrt3 / 3.0,
-                y: -sqrt3 / 3.0,
-                z: sqrt3 / 3.0,
-            },
-            Point {
-                x: (sqrt15 + sqrt3) / 6.0,
-                y: (sqrt15 - sqrt3) / 6.0,
-                z: 0.0,
-            },
+            Point { x: -sqrt3 / 3.0, y: -sqrt3 / 3.0, z: -sqrt3 / 3.0 },
+            Point { x: -sqrt3 / 3.0, y: -sqrt3 / 3.0, z: sqrt3 / 3.0 },
+            Point { x: -sqrt3 / 3.0, y: sqrt3 / 3.0, z: -sqrt3 / 3.0 },
+            Point { x: -sqrt3 / 3.0, y: sqrt3 / 3.0, z: sqrt3 / 3.0 },
+            Point { x: sqrt3 / 3.0, y: -sqrt3 / 3.0, z: -sqrt3 / 3.0 },
+            Point { x: sqrt3 / 3.0, y: -sqrt3 / 3.0, z: sqrt3 / 3.0 },
+            Point { x: (sqrt15 + sqrt3) / 6.0, y: (sqrt15 - sqrt3) / 6.0, z: 0.0 },
         ];
 
-        let p6 = Point {
-            x: sqrt3 / 3.0,
-            y: sqrt3 / 3.0,
-            z: -sqrt3 / 3.0,
-        };
-        let p7 = Point {
-            x: sqrt3 / 3.0,
-            y: sqrt3 / 3.0,
-            z: sqrt3 / 3.0,
-        };
+        let p6 = Point { x: sqrt3 / 3.0, y: sqrt3 / 3.0, z: -sqrt3 / 3.0 };
+        let p7 = Point { x: sqrt3 / 3.0, y: sqrt3 / 3.0, z: sqrt3 / 3.0 };
 
         fn find4(n1: Point, n2: Point) -> Point {
             let mid = (n1 + n2).scale(0.5);
@@ -123,26 +86,10 @@ impl PartCreator {
         let p32_3 = find3(axis[3], axis[2]);
 
         let normals = vec![
-            Point {
-                x: -1.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            Point {
-                x: 0.0,
-                y: -1.0,
-                z: 0.0,
-            },
-            Point {
-                x: 0.0,
-                y: 0.0,
-                z: 1.0,
-            },
-            Point {
-                x: 0.0,
-                y: 0.0,
-                z: -1.0,
-            },
+            Point { x: -1.0, y: 0.0, z: 0.0 },
+            Point { x: 0.0, y: -1.0, z: 0.0 },
+            Point { x: 0.0, y: 0.0, z: 1.0 },
+            Point { x: 0.0, y: 0.0, z: -1.0 },
             (axis[2] + axis[6]).norm(),
             (axis[3] + axis[6]).norm(),
             (axis[4] + axis[5] + axis[6]).norm().scale(0.92),
@@ -210,10 +157,10 @@ impl PartCreator {
         self.get_part_index_impl(pos, self.normals.len())
     }
 
-    pub fn get_sticker_index(&self, pos: Point2D, current_normal: usize) -> PartIndex {
+    pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
         let n = self.normals[current_normal];
         let (n1, n2) = self.n_basis[current_normal];
-        let pos = n.scale(35.0 / n.sqr_len()) + n1.scale(pos.0) + n2.scale(pos.1);
+        let pos = n.scale(35.0 / n.sqr_len()) + n1.scale(pos.x) + n2.scale(pos.y);
         let result = self.get_part_index_impl(pos, current_normal);
         (result > 0) as PartIndex
     }

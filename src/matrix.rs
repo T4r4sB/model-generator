@@ -7,9 +7,7 @@ pub struct Matrix {
 
 impl Matrix {
     pub fn new() -> Self {
-        Self {
-            data: [[0.0; 4]; 4],
-        }
+        Self { data: [[0.0; 4]; 4] }
     }
 
     pub fn new_proj(fovy: f32, aspect: f32, zfar: f32, znear: f32) -> Self {

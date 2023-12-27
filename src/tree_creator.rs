@@ -22,20 +22,14 @@ impl TreeCreator {
         let h: f32 = self.rng.gen_range(-1.0..1.0);
         let a: f32 = self.rng.gen_range(0.0..std::f32::consts::PI * 2.0);
         let (s, c) = a.sin_cos();
-        Point {
-            x: r * c,
-            y: r * s,
-            z: h,
-        }
+        Point { x: r * c, y: r * s, z: h }
     }
 
     fn generate(&mut self, pos: Point, dn: Point, ttn: usize, dl: f32) {
         let l = dn.len();
         if l < 0.5 {
-            self.nodes.push(Node {
-                pos,
-                r: self.rng.gen_range(3.0..9.0),
-            });
+            self.nodes
+                .push(Node { pos, r: self.rng.gen_range(3.0..9.0) });
             return;
         }
         self.nodes.push(Node { pos, r: l * 2.0 });
@@ -70,21 +64,10 @@ impl TreeCreator {
     }
 
     pub fn new() -> Self {
-        let mut result = Self {
-            rng: rand::thread_rng(),
-            nodes: Vec::new(),
-        };
+        let mut result = Self { rng: rand::thread_rng(), nodes: Vec::new() };
         result.generate(
-            Point {
-                x: 0.0,
-                y: 0.0,
-                z: -18.0,
-            },
-            Point {
-                x: 0.0,
-                y: 0.0,
-                z: 1.5,
-            },
+            Point { x: 0.0, y: 0.0, z: -18.0 },
+            Point { x: 0.0, y: 0.0, z: 1.5 },
             0,
             0.98,
         );

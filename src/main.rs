@@ -22,6 +22,7 @@ use glutin_winit::{self, DisplayBuilder, GlWindow};
 
 mod points3d;
 use crate::points3d::*;
+mod points2d;
 mod matrix;
 use crate::matrix::*;
 mod model;
@@ -30,7 +31,9 @@ mod solid;
 use crate::solid::*;
 mod contour;
 use crate::contour::*;
+mod cube_creator;
 mod part_creator;
+mod sphere_creator;
 mod tree_creator;
 
 pub mod gl {
@@ -198,11 +201,7 @@ pub fn gl_main(event_loop: winit::event_loop::EventLoop<()>) {
                         }
                     }
                 }
-                WindowEvent::KeyboardInput {
-                    device_id,
-                    input,
-                    is_synthetic,
-                } => {
+                WindowEvent::KeyboardInput { device_id, input, is_synthetic } => {
                     let renderer = renderer.as_mut().unwrap();
                     match input.virtual_keycode {
                         Some(winit::event::VirtualKeyCode::W) => {
@@ -226,12 +225,7 @@ pub fn gl_main(event_loop: winit::event_loop::EventLoop<()>) {
                         _ => {}
                     }
                 }
-                WindowEvent::MouseInput {
-                    device_id,
-                    state,
-                    button,
-                    modifiers: _,
-                } => {
+                WindowEvent::MouseInput { device_id, state, button, modifiers: _ } => {
                     let renderer = renderer.as_mut().unwrap();
                     match button {
                         winit::event::MouseButton::Left => {
@@ -243,11 +237,7 @@ pub fn gl_main(event_loop: winit::event_loop::EventLoop<()>) {
                         _ => {}
                     }
                 }
-                WindowEvent::CursorMoved {
-                    device_id,
-                    position,
-                    modifiers: _,
-                } => {
+                WindowEvent::CursorMoved { device_id, position, modifiers: _ } => {
                     let renderer = renderer.as_mut().unwrap();
                     renderer.position(position);
                 }
@@ -382,7 +372,9 @@ impl Renderer {
             gl.GenBuffers(1, &mut veo);
 
             let part_creator = part_creator::PartCreator::new();
-            let tree_creator = tree_creator::TreeCreator::new();
+            //let part_creator = cube_creator::CubeCreator::new();
+            //let tree_creator = tree_creator::TreeCreator::new();
+            //let part_creator = sphere_creator::SphereCreator::new();
             let part_func = &|p| part_creator.get_part_index(p);
 
             //let part_func = &|p| tree_creator.get_part_index(p);
@@ -399,25 +391,15 @@ impl Renderer {
             let mut cc = ContourCreator::new(512, 320.0, 20);
 
             for i in 0..part_creator.faces() {
-                let mut contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
+                let contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
 
-                if i == 0 {
-                    let mut contours2 = cc.make_contour(&|p| {
-                        part_creator.get_sticker_index(p, part_creator.faces() - 1)
-                    });
-
-                    contours2.get_mut(&1).unwrap().shift(Point2D(20.0, 0.0));
-                    contours
-                        .get_mut(&1)
-                        .unwrap()
-                        .merge(contours2.remove(&1).unwrap());
-                }
-
-                for (index, cc) in &mut contours {
+                for (index, mut cc) in contours {
                     for _ in 0..5 {
                         cc.smooth();
                     }
-                    println!("save {i}:{index} ({} points) to dxf...", cc.points_count());
+                    cc.optimize(0.02);
+                    //let cc = cc.split_to_triangles();
+                    println!("save {i}:{index} ({} points, {} square) to dxf...", cc.points_count(), cc.get_square());
                     if let Err(msg) =
                         cc.save_to_dxf(std::path::Path::new(&format!("contour_{i}_{index}.dxf")))
                     {
@@ -426,7 +408,7 @@ impl Renderer {
                 }
             }
 
-            let mut mc = ModelCreator::new(512, 130.0, 20, 0, part_func);
+            let mut mc = ModelCreator::new(128, 130.0, 20, 0, part_func);
             let width = 0.05;
             while !mc.finished() {
                 mc.fill_next_layer(part_func);
@@ -445,17 +427,17 @@ impl Renderer {
             for (&m_index, m) in &mut models {
                 sum_v += m.vertices.len();
                 max_v = std::cmp::max(max_v, m.vertices.len());
-                m.validate_and_delete_small_groups();
-                let smooth_cnt = 10;
+                //m.validate_and_delete_small_groups();
+                let smooth_cnt = 2;
                 for i in 0..smooth_cnt {
                     m.smooth(0.4);
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-                m.optimize(width, 0.99, 10, 0.9);
+                //m.optimize(width, 0.999, 10, 0.99);
                 println!("tcount after {}", m.triangles.len());
                 m.delete_unused_v();
-                //m.out_of_center(1.0);
+                m.out_of_center(0.0);
 
                 sum_v_after += m.vertices.len();
                 max_v_after = std::cmp::max(max_v_after, m.vertices.len());
@@ -542,15 +524,7 @@ impl Renderer {
                 vbo,
                 veo,
                 proj_matrix: Matrix::new_proj(std::f32::consts::FRAC_PI_8, 1.0, 1000.0, 0.01),
-                view_matrix: Matrix::new_view(
-                    Point {
-                        x: 0.0,
-                        y: 0.0,
-                        z: 1.0,
-                    },
-                    0.0,
-                    0.0,
-                ),
+                view_matrix: Matrix::new_view(Point { x: 0.0, y: 0.0, z: 1.0 }, 0.0, 0.0),
                 index_count: array_buffer.i.len(),
                 prev_time: std::time::Instant::now(),
                 input_state: InputState::default(),
@@ -612,19 +586,11 @@ impl Renderer {
             }
 
             if self.input_state.up {
-                self.camera_position.position += Point {
-                    x: 0.0,
-                    y: -delta,
-                    z: 0.0,
-                };
+                self.camera_position.position += Point { x: 0.0, y: -delta, z: 0.0 };
             }
 
             if self.input_state.down {
-                self.camera_position.position += Point {
-                    x: 0.0,
-                    y: delta,
-                    z: 0.0,
-                };
+                self.camera_position.position += Point { x: 0.0, y: delta, z: 0.0 };
             }
 
             let position = self.camera_position.position;

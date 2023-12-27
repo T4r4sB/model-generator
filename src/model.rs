@@ -169,10 +169,7 @@ impl Model {
             use_edge(&mut face_adj[i][2], t.2, t.0);
         }
 
-        MeshTopology {
-            edge_to_face,
-            face_adj,
-        }
+        MeshTopology { edge_to_face, face_adj }
     }
 
     pub fn v_near_t(&self, v_index: u32, t: Triangle, eps: f32) -> bool {
@@ -939,56 +936,16 @@ mod tests {
     #[test]
     fn convex_floating_pituh() {
         let v2c = [
-            Point {
-                x: 17.226563,
-                y: -17.226563,
-                z: -17.5,
-            },
-            Point {
-                x: 17.226563,
-                y: -17.5,
-                z: -17.226563,
-            },
-            Point {
-                x: 17.226563,
-                y: -17.226563,
-                z: -17.226563,
-            },
-            Point {
-                x: 17.5,
-                y: -17.226563,
-                z: -17.226563,
-            },
-            Point {
-                x: 17.226563,
-                y: -17.235107,
-                z: -17.5,
-            },
-            Point {
-                x: 17.226563,
-                y: -17.5,
-                z: -17.235107,
-            },
-            Point {
-                x: 17.235107,
-                y: -17.226563,
-                z: -17.5,
-            },
-            Point {
-                x: 17.235107,
-                y: -17.5,
-                z: -17.226563,
-            },
-            Point {
-                x: 17.5,
-                y: -17.226563,
-                z: -17.235107,
-            },
-            Point {
-                x: 17.5,
-                y: -17.235107,
-                z: -17.226563,
-            },
+            Point { x: 17.226563, y: -17.226563, z: -17.5 },
+            Point { x: 17.226563, y: -17.5, z: -17.226563 },
+            Point { x: 17.226563, y: -17.226563, z: -17.226563 },
+            Point { x: 17.5, y: -17.226563, z: -17.226563 },
+            Point { x: 17.226563, y: -17.235107, z: -17.5 },
+            Point { x: 17.226563, y: -17.5, z: -17.235107 },
+            Point { x: 17.235107, y: -17.226563, z: -17.5 },
+            Point { x: 17.235107, y: -17.5, z: -17.226563 },
+            Point { x: 17.5, y: -17.226563, z: -17.235107 },
+            Point { x: 17.5, y: -17.235107, z: -17.226563 },
         ];
         let mut test = Model::convex(&v2c, 0.0).unwrap();
         test.validate_and_delete_small_groups();
