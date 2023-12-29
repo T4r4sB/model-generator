@@ -22,8 +22,8 @@ use glutin_winit::{self, DisplayBuilder, GlWindow};
 
 mod points3d;
 use crate::points3d::*;
-mod points2d;
 mod matrix;
+mod points2d;
 use crate::matrix::*;
 mod model;
 use crate::model::*;
@@ -394,12 +394,13 @@ impl Renderer {
                 let contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
 
                 for (index, mut cc) in contours {
-                    for _ in 0..5 {
-                        cc.smooth();
-                    }
                     cc.optimize(0.02);
-                    //let cc = cc.split_to_triangles();
-                    println!("save {i}:{index} ({} points, {} square) to dxf...", cc.points_count(), cc.get_square());
+                    println!(
+                        "save {i}:{index} ({} points, {} square) to dxf...",
+                        cc.points_count(),
+                        cc.get_square()
+                    );
+                    cc.split_to_triangles();
                     if let Err(msg) =
                         cc.save_to_dxf(std::path::Path::new(&format!("contour_{i}_{index}.dxf")))
                     {

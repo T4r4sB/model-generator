@@ -162,6 +162,7 @@ impl PartCreator {
         let (n1, n2) = self.n_basis[current_normal];
         let pos = n.scale(35.0 / n.sqr_len()) + n1.scale(pos.x) + n2.scale(pos.y);
         let result = self.get_part_index_impl(pos, current_normal);
+
         (result > 0) as PartIndex
     }
 
