@@ -12,7 +12,7 @@ pub struct Triangle(pub u32, pub u32, pub u32);
 pub struct Model {
     pub vertices: Vec<Point>,
     pub triangles: Vec<Triangle>,
-    free_vertices: Vec<u32>,
+    pub free_vertices: Vec<u32>,
 }
 
 #[derive(Debug, Default)]
@@ -29,11 +29,7 @@ pub struct ArrayBuffer {
 
 impl Model {
     pub fn new() -> Self {
-        Self {
-            vertices: Vec::new(),
-            triangles: Vec::new(),
-            free_vertices: Vec::new(),
-        }
+        Self { vertices: Vec::new(), triangles: Vec::new(), free_vertices: Vec::new() }
     }
 
     pub fn add_vertex(&mut self, p: Point) -> u32 {
@@ -229,10 +225,10 @@ impl Model {
                 continue;
             }
 
+            let cn = self.get_normal(self.triangles[ti]);
             let mut stack = Vec::<u32>::new();
             stack.push(ti as u32);
             while let Some(cur_ti) = stack.pop() {
-                let cn = self.get_normal(self.triangles[ti]);
                 for new_ti in top.face_adj[cur_ti as usize] {
                     if group_of_t[new_ti as usize] != 0 {
                         continue;
@@ -886,11 +882,7 @@ impl Model {
 
     pub fn convex(vertices: &[Point], eps: f32) -> Option<Self> {
         let triangles = Self::convex_triangles(vertices, eps)?;
-        Some(Self {
-            vertices: vertices.to_owned(),
-            triangles,
-            free_vertices: Vec::new(),
-        })
+        Some(Self { vertices: vertices.to_owned(), triangles, free_vertices: Vec::new() })
     }
 
     pub fn save_to_stl(&self, path: &std::path::Path) -> Result<(), String> {

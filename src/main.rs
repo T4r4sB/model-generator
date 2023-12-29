@@ -395,6 +395,15 @@ impl Renderer {
 
                 for (index, mut cc) in contours {
                     cc.optimize(0.02);
+                    let ex = cc.extrude(2.0);
+                    for j in 0..ex.len() {
+                        if let Err(msg) = ex[j].save_to_stl(std::path::Path::new(&format!(
+                            "extruded_{i}_{index}_{j}.stl"
+                        ))) {
+                            println!("{}", msg);
+                        }
+                    }
+
                     println!(
                         "save {i}:{index} ({} points, {} square) to dxf...",
                         cc.points_count(),

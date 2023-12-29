@@ -416,6 +416,42 @@ impl ConnectedPart {
         output
     }
 
+    pub fn extrude(&self, points: &[Point], width: f32) -> crate::model::Model {
+        let mut points_3d = Vec::with_capacity(points.len() * 2);
+        for &p in points {
+            points_3d.push(crate::points3d::Point { x: p.x, y: p.y, z: 0.0 });
+            points_3d.push(crate::points3d::Point { x: p.x, y: p.y, z: width });
+        }
+
+        let mut triangles = Vec::with_capacity(points.len() * 4);
+        for c in &self.contours {
+            let mut prev = c.points[c.points.len() - 1];
+            for &p in &c.points {
+                triangles.push(crate::model::Triangle(prev * 2, p * 2, p * 2 + 1));
+                triangles.push(crate::model::Triangle(prev * 2, p * 2 + 1, prev * 2 + 1));
+                prev = p;
+            }
+        }
+
+        for t in self.clone().split_to_triangles(points) {
+            for c in t.contours {
+                assert!(c.points.len() == 3);
+                triangles.push(crate::model::Triangle(
+                    c.points[2] * 2,
+                    c.points[1] * 2,
+                    c.points[0] * 2,
+                ));
+                triangles.push(crate::model::Triangle(
+                    c.points[0] * 2 + 1,
+                    c.points[1] * 2 + 1,
+                    c.points[2] * 2 + 1,
+                ));
+            }
+        }
+
+        crate::model::Model { vertices: points_3d, triangles, free_vertices: Vec::new() }
+    }
+
     pub fn get_square(&self, points: &[Point]) -> f32 {
         let mut result = 0.0;
         for c in &self.contours {
@@ -478,6 +514,13 @@ impl ContourSet {
         }
 
         self.parts = parts;
+    }
+
+    pub fn extrude(&self, width: f32) -> Vec<crate::model::Model> {
+        self.parts
+            .iter()
+            .map(|p| p.extrude(&self.points, width))
+            .collect()
     }
 }
 
