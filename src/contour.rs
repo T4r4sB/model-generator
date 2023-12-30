@@ -337,7 +337,7 @@ impl ConnectedPart {
                     let pi1 = cp.get(points, i) - p_base;
                     let cri = cross(pi, bisect);
                     let cri1 = cross(pi1, bisect);
-                    if cri >= 0.0 && cri1 < 0.0 {
+                    if cri >= 0.0 && cri1 < 0.0 || cri > 0.0 && cri1 <= 0.0 {
                         let di = dot(pi, bisect);
                         let di1 = dot(pi1, bisect);
                         let d = (di1 * cri - di * cri1) / (cri - cri1);
@@ -370,7 +370,11 @@ impl ConnectedPart {
             let cp = &self.contours[ci];
             for i in 0..cp.points.len() {
                 let pi = cp.get(points, i) - p_base;
-                if cross(pi - p1, pi - p2) <= EPS || cross(pi, p2) <= EPS || cross(p1, pi) <= EPS {
+                if dot(pi, bisect) < EPS
+                    || cross(pi - p1, pi - p2) < -EPS
+                    || cross(pi, p2) < -EPS
+                    || cross(p1, pi) < -EPS
+                {
                     continue;
                 }
 
@@ -992,6 +996,20 @@ mod tests {
         ];
         let c = ConnectedPart { contours: vec![Contour { points: vec![0, 1, 2, 3, 4, 5] }] };
         assert_eq!(c.find_pair_for_bad_angle(&BAD_ANGLE_PAIR, 0, 0), (0, 4));
+    }
+
+    #[test]
+    fn test_pair_for_bad_angle_intermediate_point_case() {
+        static BAD_ANGLE_PAIR: [Point; 6] = [
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 1.0, y: -1.0 },
+            Point { x: 1.0, y: 1.0 },
+            Point { x: 2.0, y: 0.0 },
+            Point { x: 2.0, y: 2.0 },
+            Point { x: -3.0, y: -1.0 },
+        ];
+        let c = ConnectedPart { contours: vec![Contour { points: vec![0, 1, 2, 3, 4, 5] }] };
+        assert_eq!(c.find_pair_for_bad_angle(&BAD_ANGLE_PAIR, 0, 0), (0, 2));
     }
 
     #[test]
