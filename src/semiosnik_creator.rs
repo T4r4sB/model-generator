@@ -9,7 +9,7 @@ struct NearAxis {
     dist: f32,
     pos: Point,
 }
-pub struct PartCreator {
+pub struct SemiosnikCreator {
     axis: Vec<Point>,
     normals: Vec<Point>,
     n_basis: Vec<(Point, Point)>,
@@ -40,7 +40,7 @@ pub fn sqr(x: f32) -> f32 {
     x * x
 }
 
-impl PartCreator {
+impl SemiosnikCreator {
     pub fn new() -> Self {
         let sqrt3 = 3.0f32.sqrt();
         let sqrt15 = 15.0f32.sqrt();
@@ -113,7 +113,7 @@ impl PartCreator {
         let axis_pos = RefCell::new(Vec::new());
         let axis_neg = RefCell::new(Vec::new());
 
-        let long_edges = vec![
+        let long_edges = vec![            
             1 << 0 | 1 << 3,
             1 << 1 | 1 << 2,
             1 << 0 | 1 << 5,
@@ -157,9 +157,26 @@ impl PartCreator {
         self.get_part_index_impl(pos, self.normals.len())
     }
 
-    pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
+    pub fn get_sticker_index(
+        &self,
+        pos: crate::points2d::Point,
+        current_normal: usize,
+    ) -> PartIndex {
+        let current_normal = if current_normal == 7 {
+            return 0;
+        } else if current_normal == 8 {
+            7
+        } else {
+            current_normal
+        };
+
         let n = self.normals[current_normal];
         let (n1, n2) = self.n_basis[current_normal];
+
+        if current_normal == 0 && pos.x > 13.0 {
+            return self.get_sticker_index(crate::points2d::Point { x: pos.x - 12.0, y: pos.y }, 8);
+        }
+
         let pos = n.scale(35.0 / n.sqr_len()) + n1.scale(pos.x) + n2.scale(pos.y);
         let result = self.get_part_index_impl(pos, current_normal);
 
@@ -299,9 +316,9 @@ impl PartCreator {
 
                 let mut curvyness = 16.0;
                 if sticker {
-                    cone_angle += 0.02;
-                    cone_angle_in -= 0.02;
-                    curvyness = 24.0;
+                    cone_angle += 0.01;
+                    cone_angle_in -= 0.01;
+                    curvyness = 18.0;
                 }
 
                 let p1 = a.any_perp().norm();

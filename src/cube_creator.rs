@@ -84,7 +84,7 @@ impl CubeCreator {
         for i in 0..self.normals.len() {
             let n = self.normals[i];
             let d = dot(n, pos);
-            let center_dist = if sticker { 17.999 } else { 18.999 } + self.l[i];
+            let center_dist = if sticker { 18.499 } else { 18.999 } + self.l[i];
             if i != current_normal && d > center_dist {
                 return 0;
             }
@@ -176,7 +176,7 @@ impl CubeCreator {
                     .sqrt();
             }
 
-            if sticker && shortest_dist < 1.0 {
+            if sticker && shortest_dist < 0.5 {
                 return (0, 0.0, 0.0);
             }
 

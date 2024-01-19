@@ -6,7 +6,6 @@ use std::cell::RefCell;
 use std::ops::DerefMut;
 
 pub struct SphereCreator {
-    points: Vec<Point>,
 }
 
 pub fn sqr(x: f32) -> f32 {
@@ -15,15 +14,9 @@ pub fn sqr(x: f32) -> f32 {
 
 impl SphereCreator {
     pub fn new() -> Self {
-        let mut points = Vec::new();
-        for i in 0..1 {
-            let a = i as f32 * std::f32::consts::PI / 5.0;
-            let r = 20.0;
-            points.push(Point { x: a.cos() * r, y: a.sin() * r, z: 0.0 });
-            points.push(Point { x: -a.cos() * r, y: -a.sin() * r, z: 0.0 });
-        }
+   
 
-        Self { points }
+        Self {  }
     }
 
     pub fn faces(&self) -> usize {
@@ -35,27 +28,38 @@ impl SphereCreator {
     }
 
     pub fn get_part_index(&self, pos: Point) -> PartIndex {
-        if pos.z < 0.0 || pos.z > 8.0 {
+        if pos.z < -3.0 || pos.z > 3.0 {
             return 0;
         }
-        if sqr(pos.x) + sqr(pos.y) > sqr(30.0 - pos.z) {
-            return 0;
-        }
-
-        for (i, &p) in self.points.iter().enumerate() {
-            let d = sqr(pos.x - p.x) + sqr(pos.y - p.y);
-            if d < sqr(1.35) || d < sqr(f32::max(0.0, 3.0 - pos.z)) {
-                return (1 + i) as PartIndex;
+        
+        if pos.x.abs() < 10.0 {
+            if dist_pl(pos, Point{x: 10.0, y: 17.0, z:0.0}, Point{x: -10.0, y: 17.0, z:0.0}) < 3.0 {
+                return 1;
             }
-            if d < sqr(1.45) || d < sqr(f32::max(0.0, 3.2 - pos.z)) {
-                return 0;
+            
+            if dist_pl(pos, Point{x: -5.0, y: -17.0, z:0.0}, Point{x: -10.0, y: -17.0, z:0.0}) < 3.0 {
+                return 1;
+            }
+
+            if dist_pl(pos, Point{x: 5.0, y: -17.0, z:0.0}, Point{x: 10.0, y: -17.0, z:0.0}) < 3.0 {
+                return 1;
             }
         }
 
-        if pos.z > 3.0 {
-            return 0;
+        if pos.x > 10.0 {
+            let r = (sqr(pos.x - 10.0) + sqr(pos.y)).sqrt();
+            if sqr(r - 17.0) + sqr(pos.z) < sqr(3.0) {
+                return 1;
+            }
         }
 
-        return 100;
+        if pos.x < -10.0 {
+            let r = (sqr(pos.x + 10.0) + sqr(pos.y)).sqrt();
+            if sqr(r - 17.0) + sqr(pos.z) < sqr(3.0) {
+                return 1;
+            }
+        }
+
+        return 0;
     }
 }

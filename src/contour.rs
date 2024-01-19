@@ -1,6 +1,8 @@
 use crate::points2d::*;
 use dxf::entities::*;
+use dxf::objects::*;
 use dxf::Drawing;
+use fxhash::FxHashMap;
 use std::collections::HashMap;
 
 pub type PartIndex = u32;
@@ -8,23 +10,23 @@ const BAD_INDEX: PartIndex = 0xFFFFFFFF;
 
 #[derive(Debug, Clone)]
 pub struct Contour {
-    points: Vec<u32>,
+    pub points: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ConnectedPart {
-    contours: Vec<Contour>,
+    pub contours: Vec<Contour>,
 }
 
 #[derive(Debug, Clone)]
 pub struct FragmentedParts {
-    contours: Vec<Contour>,
+    pub contours: Vec<Contour>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ContourSet {
-    points: Vec<Point>,
-    parts: Vec<ConnectedPart>,
+    pub points: Vec<Point>,
+    pub parts: Vec<ConnectedPart>,
 }
 
 impl Contour {
@@ -63,7 +65,7 @@ impl Contour {
         let mut prev = self.get(points, self.points.len() - 1) - p;
         for i in 0..self.points.len() {
             let cur = self.get(points, i) - p;
-            if prev.y >= 0.0 && cur.y < 0.0 && cross(prev, cur) < 0.0 {
+            if prev.y >= 0.0 && cur.y < 0.0 && cross(prev, cur) <= 0.0 {
                 c_in += 1;
             } else if prev.y < 0.0 && cur.y >= 0.0 && cross(prev, cur) > 0.0 {
                 c_out += 1;
@@ -205,9 +207,11 @@ impl Contour {
             return None;
         }
 
-        let pprev = self.get(points, self.points.len() - 2);
-        let mut prev = self.get(points, self.points.len() - 1);
+        let mut prev_prev_i = self.points.len() - 2;
+        let pprev = self.get(points, prev_prev_i);
         let mut prev_i = self.points.len() - 1;
+        let mut prev = self.get(points, prev_i);
+
         let mut prev_delta = prev - pprev;
 
         let mut result = None;
@@ -216,7 +220,50 @@ impl Contour {
         for i in 0..self.points.len() {
             let cur = self.get(points, i);
             let delta = cur - prev;
-            if cross(delta, prev_delta) > 0.0 {
+
+            let bad;
+
+            if self.points[prev_prev_i] == self.points[i] {
+                // Hateful "hair" case
+                let mut c2 = self.points[prev_prev_i];
+                let mut c1 = self.points[prev_i];
+                let mut j1 = prev_prev_i;
+                let mut j2 = i;
+                loop {
+                    j1 = if j1 == 0 {
+                        self.points.len() - 1
+                    } else {
+                        j1 - 1
+                    };
+                    j2 = if j2 == self.points.len() - 1 {
+                        0
+                    } else {
+                        j2 + 1
+                    };
+                    let pt1 = self.points[j1];
+                    let pt2 = self.points[j2];
+                    if pt1 == pt2 {
+                        c2 = c1;
+                        c1 = pt1;
+                        continue;
+                    }
+
+                    let coo0 = points[c2 as usize];
+                    let coo1 = points[c1 as usize] - coo0;
+                    let coo2 = points[pt1 as usize] - coo0;
+                    let coo3 = points[pt2 as usize] - coo0;
+
+                    bad = (cross(coo1, coo2) > 0.0) as i32
+                        + (cross(coo2, coo3) > 0.0) as i32
+                        + (cross(coo3, coo1) > 0.0) as i32
+                        >= 2;
+                    break;
+                }
+            } else {
+                bad = cross(delta, prev_delta) > 0.0;
+            }
+
+            if bad {
                 if change {
                     // try to get "middle" bad angle
                     result = Some(prev_i);
@@ -226,6 +273,7 @@ impl Contour {
 
             prev_delta = delta;
             prev = cur;
+            prev_prev_i = prev_i;
             prev_i = i;
         }
 
@@ -314,78 +362,128 @@ impl ConnectedPart {
     }
 
     fn find_pair_for_bad_angle(&self, points: &[Point], c: usize, p: usize) -> (usize, usize) {
+        self.find_pair_for_bad_angle_impl(points, c, p, false)
+    }
+
+    fn find_pair_for_bad_angle_impl(
+        &self,
+        points: &[Point],
+        c: usize,
+        p: usize,
+        diagnostic: bool,
+    ) -> (usize, usize) {
         const EPS: f32 = 1.0e-6;
         let ps0 = &self.contours[c];
         let p_base = ps0.get(points, p);
-        let p1 =
-            (ps0.get(points, if p == 0 { ps0.points.len() - 1 } else { p - 1 }) - p_base).norm();
-        let p2 =
-            (ps0.get(points, if p == ps0.points.len() - 1 { 0 } else { p + 1 }) - p_base).norm();
-        let bisect = p1.perp() - p2.perp() - p1.norm() - p2.norm();
+        let p1 = ps0.get(points, if p == 0 { ps0.points.len() - 1 } else { p - 1 }) - p_base;
+        let p2 = ps0.get(points, if p == ps0.points.len() - 1 { 0 } else { p + 1 }) - p_base;
 
-        // stage1: find closest edge crossing bisect
-        let mut mind = (0, 0, 0, f32::INFINITY, false);
+        let bisect = p1.norm().perp() - p2.norm().perp() - p1.norm() - p2.norm();
+
+        // Stage1: find possible points
+        let mut candidates = Vec::new();
+
         for ci in 0..self.contours.len() {
             let cp = &self.contours[ci];
+            let prev_prev_i = cp.points.len() - 2;
             let mut prev_i = cp.points.len() - 1;
+            let mut prev_prev = cp.get(points, prev_prev_i) - p_base;
+            let mut prev = cp.get(points, prev_i) - p_base;
             for i in 0..cp.points.len() {
-                if ci == c && (prev_i == p || i == p) {
-                    // skip
-                    // jump to loop iter finalization
-                } else {
-                    let pi = cp.get(points, prev_i) - p_base;
-                    let pi1 = cp.get(points, i) - p_base;
-                    let cri = cross(pi, bisect);
-                    let cri1 = cross(pi1, bisect);
-                    if cri >= 0.0 && cri1 < 0.0 || cri > 0.0 && cri1 <= 0.0 {
-                        let di = dot(pi, bisect);
-                        let di1 = dot(pi1, bisect);
-                        let d = (di1 * cri - di * cri1) / (cri - cri1);
-                        if d > EPS && d < mind.3 {
-                            mind = (ci, prev_i, i, d, true);
-                        }
+                let pi = cp.get(points, i) - p_base;
+
+                if cross(prev, p1) > EPS || cross(p2, prev) > EPS {
+                    let cr1 = cross(prev_prev, prev);
+                    let cr2 = cross(prev, pi);
+                    let sq = cross(prev_prev - prev, pi - prev);
+
+                    if (cr1 > EPS) as i32 + (cr2 > EPS) as i32 + (sq > EPS) as i32 >= 2 {
+                        candidates.push((ci, prev_i));
                     }
                 }
 
+                prev_prev = prev;
+                prev = pi;
                 prev_i = i;
             }
         }
+        if candidates.is_empty() {
+            let fail = ContourSet { points: points.to_owned(), parts: vec![self.clone()] };
+            let _ = fail.save_to_dxf(std::path::Path::new("fail.dxf"));
+        }
+        assert!(!candidates.is_empty());
+        let cache: FxHashMap<_, f32> = candidates
+            .iter()
+            .map(|&(c, p)| {
+                let pt = self.contours[c].get(points, p) - p_base;
+                ((c, p), (cross(bisect, pt) / dot(bisect, pt)).abs())
+            })
+            .collect();
 
-        assert!(mind.4);
+        candidates.sort_by(|k1, k2| {
+            cache
+                .get(k1)
+                .unwrap()
+                .partial_cmp(cache.get(k2).unwrap())
+                .unwrap()
+        });
 
-        let mut p1 = self.contours[mind.0].get(points, mind.1) - p_base;
-        let mut p2 = self.contours[mind.0].get(points, mind.2) - p_base;
-
-        let mut closest;
-        if dot(p1, bisect) > dot(p2, bisect) {
-            p2 = bisect;
-            closest = (mind.0, mind.1, f32::INFINITY);
-        } else {
-            p1 = bisect;
-            closest = (mind.0, mind.2, f32::INFINITY);
+        if diagnostic {
+            println!("candidates={:?}", candidates);
+            println!("cache={:?}", cache);
         }
 
-        // stage2: find closest point in triangle
-        for ci in 0..self.contours.len() {
-            let cp = &self.contours[ci];
-            for i in 0..cp.points.len() {
-                let pi = cp.get(points, i) - p_base;
-                if dot(pi, bisect) < EPS
-                    || cross(pi - p1, pi - p2) < -EPS
-                    || cross(pi, p2) < -EPS
-                    || cross(p1, pi) < -EPS
-                {
-                    continue;
-                }
+        let mut intersectors = FxHashMap::default();
 
-                let d = cross(pi, bisect).abs();
-                if d < closest.2 {
-                    closest = (ci, i, d);
+        // Stage2: check candidates
+        'check_candidates: for (c, i) in candidates {
+            let control = self.contours[c].get(points, i);
+
+            fn intersect(p1: Point, p2: Point, p3: Point, p4: Point) -> bool {
+                let cr1 = cross(p1 - p4, p3 - p4);
+                let cr2 = cross(p2 - p4, p3 - p4);
+                if cr1 < 0.0 && cr2 > 0.0 || cr1 > 0.0 && cr2 < 0.0 {
+                    let cr3 = cross(p3 - p2, p1 - p2);
+                    let cr4 = cross(p4 - p2, p1 - p2);
+                    if cr3 <= 0.0 && cr4 >= 0.0 || cr3 >= 0.0 && cr4 <= 0.0 {
+                        return true;
+                    }
+                }
+                return false;
+            }
+
+            for (_, &(prev, cur)) in &intersectors {
+                if intersect(p_base, control, prev, cur) {
+                    continue 'check_candidates;
                 }
             }
+
+            for ci in 0..self.contours.len() {
+                let cp = &self.contours[ci];
+                let mut prev = cp.get(points, cp.points.len() - 1);
+                for i in 0..cp.points.len() {
+                    let cur = cp.get(points, i);
+                    if intersectors.contains_key(&(ci, i)) {
+                        continue;
+                    }
+
+                    if intersect(p_base, control, prev, cur) {
+                        // bad
+                        if diagnostic {
+                            println!("failed with {}:{}", ci, i);
+                        }
+                        intersectors.insert((ci, i), (prev, cur));
+                        continue 'check_candidates;
+                    }
+
+                    prev = cur;
+                }
+            }
+
+            return (c, i);
         }
 
-        (closest.0, closest.1)
+        panic!("All candidates are wrong!");
     }
 
     pub fn split_to_triangles_if_convex(self, points: &[Point]) -> Vec<ConnectedPart> {
@@ -397,14 +495,31 @@ impl ConnectedPart {
     }
 
     pub fn split_to_triangles(self, points: &[Point]) -> Vec<ConnectedPart> {
+        self.split_to_triangles_impl(points, false)
+    }
+
+    pub fn split_to_triangles_impl(self, points: &[Point], diagnostic: bool) -> Vec<ConnectedPart> {
         let mut result_before = vec![self];
         let mut result_after = Vec::new();
 
         let mut output = Vec::new();
+        let mut iter = 0;
         loop {
+            if diagnostic {
+                let to_save =
+                    ContourSet { points: points.to_owned(), parts: result_before.clone() };
+                println!("results_before={:?}", result_before);
+                let _ = to_save.save_to_dxf(std::path::Path::new(&format!("split_{}.dxf", iter)));
+                if iter == 202 {
+                    return vec![];
+                };
+                iter += 1;
+                println!("iter={}", iter);
+            }
+
             for r in result_before {
                 if let Some((c, i)) = r.find_bad_angle(points) {
-                    let (c2, i2) = r.find_pair_for_bad_angle(points, c, i);
+                    let (c2, i2) = r.find_pair_for_bad_angle_impl(points, c, i, diagnostic);
                     result_after.extend(r.split_by(points, c, i, c2, i2));
                 } else {
                     output.extend(r.split_to_triangles_if_convex(points));
@@ -468,17 +583,40 @@ impl ConnectedPart {
 impl ContourSet {
     pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
         let mut drawing = Drawing::new();
+        const GROUPS: bool = false;
         for part in &self.parts {
             for contour in &part.contours {
-                for i in 0..contour.points.len() {
+                if GROUPS {
+                    let mut g = Group::default();
                     fn point2d_to_dxf(pt: Point) -> dxf::Point {
                         dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 }
                     }
+                    let mut prev = point2d_to_dxf(self.points[contour.points[0] as usize]);
 
-                    let i2 = (i + 1) % contour.points.len();
-                    let pt1 = point2d_to_dxf(self.points[contour.points[i] as usize]);
-                    let pt2 = point2d_to_dxf(self.points[contour.points[i2] as usize]);
-                    drawing.add_entity(Entity::new(EntityType::Line(Line::new(pt1, pt2))));
+                    for i in 0..contour.points.len() {
+                        let v = point2d_to_dxf(self.points[contour.points[i] as usize]);
+                        g.add_entities(&Entity::new(EntityType::Line(Line::new(prev, v.clone()))));
+                        prev = v;
+                    }
+
+                    drawing.add_object(Object::new(ObjectType::Group(g)));
+                } else {
+                    let mut pl = Polyline::default();
+                    for i in 0..contour.points.len() {
+                        fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
+                            dxf::entities::Vertex::new(dxf::Point {
+                                x: pt.x as f64,
+                                y: pt.y as f64,
+                                z: 0.0,
+                            })
+                        }
+
+                        let v = point2d_to_dxf(self.points[contour.points[i] as usize]);
+                        pl.add_vertex(&mut drawing, v);
+                    }
+                    pl.set_is_closed(true);
+
+                    drawing.add_entity(Entity::new(EntityType::Polyline(pl)));
                 }
             }
         }
@@ -570,6 +708,13 @@ impl FragmentedParts {
                 }
             }
 
+            if !inside.2 {
+                let fail = ContourSet {
+                    points: points.to_owned(),
+                    parts: vec![ConnectedPart { contours: self.contours.clone() }],
+                };
+                let _ = fail.save_to_dxf(std::path::Path::new("fail.dxf"));
+            }
             assert!(inside.2);
             insides[inside.0].push(i);
         }
@@ -979,6 +1124,30 @@ mod tests {
     }
 
     #[test]
+    fn test_bad_angle_hair_inside() {
+        static BAD_ANGLE_HAIR: [Point; 4] = [
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 2.0, y: 0.0 },
+            Point { x: 1.0, y: 2.0 },
+            Point { x: 1.0, y: 1.0 },
+        ];
+        let c = Contour { points: vec![0, 1, 2, 3, 2] };
+        assert_eq!(c.find_bad_angle(&BAD_ANGLE_HAIR), Some(3));
+    }
+
+    #[test]
+    fn test_bad_angle_hair_outside() {
+        static BAD_ANGLE_HAIR: [Point; 4] = [
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 2.0, y: 0.0 },
+            Point { x: 1.0, y: 2.0 },
+            Point { x: 1.0, y: 3.0 },
+        ];
+        let c = Contour { points: vec![0, 1, 2, 3, 2] };
+        assert_eq!(c.find_bad_angle(&BAD_ANGLE_HAIR), Some(4));
+    }
+
+    #[test]
     fn test_pair_for_bad_angle() {
         let c = ConnectedPart { contours: vec![Contour { points: vec![0, 1, 2, 3] }] };
         assert_eq!(c.find_pair_for_bad_angle(&BAD_ANGLE, 0, 2), (0, 0));
@@ -995,7 +1164,7 @@ mod tests {
             Point { x: -3.0, y: -1.0 },
         ];
         let c = ConnectedPart { contours: vec![Contour { points: vec![0, 1, 2, 3, 4, 5] }] };
-        assert_eq!(c.find_pair_for_bad_angle(&BAD_ANGLE_PAIR, 0, 0), (0, 4));
+        assert_eq!(c.find_pair_for_bad_angle(&BAD_ANGLE_PAIR, 0, 0), (0, 2));
     }
 
     #[test]

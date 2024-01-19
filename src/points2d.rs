@@ -98,6 +98,7 @@ pub fn find_root(
         }
     }
 }
+
 pub fn dist_pl(p: Point, p1: Point, p2: Point) -> f32 {
     let p12 = p2 - p1;
     let l = p12.len();

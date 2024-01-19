@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use winit::event_loop::EventLoopBuilder;
 
 use std::ffi::{CStr, CString};
@@ -32,7 +34,9 @@ use crate::solid::*;
 mod contour;
 use crate::contour::*;
 mod cube_creator;
-mod part_creator;
+mod nested_cube_creator;
+mod semiosnik_creator;
+mod osnik_creator;
 mod sphere_creator;
 mod tree_creator;
 
@@ -222,6 +226,12 @@ pub fn gl_main(event_loop: winit::event_loop::EventLoop<()>) {
                         Some(winit::event::VirtualKeyCode::Space) => {
                             renderer.up(input.state == Pressed)
                         }
+                        Some(winit::event::VirtualKeyCode::Equals) => {
+                            renderer.shift += 0.1;
+                        }
+                        Some(winit::event::VirtualKeyCode::Minus) => {
+                            renderer.shift = f32::max(0.0, renderer.shift - 0.1);
+                        }
                         _ => {}
                     }
                 }
@@ -287,6 +297,7 @@ pub struct Renderer {
     veo: gl::types::GLuint,
     proj_matrix: Matrix,
     view_matrix: Matrix,
+    shift: f32,
     index_count: usize,
     prev_time: std::time::Instant,
     input_state: InputState,
@@ -305,7 +316,7 @@ impl Renderer {
             gl.Enable(gl::DEPTH_TEST);
 
             gl.Enable(gl::CULL_FACE);
-            gl.CullFace(gl::FRONT);
+            gl.CullFace(gl::BACK);
 
             if let Some(renderer) = get_gl_string(&gl, gl::RENDERER) {
                 println!("Running on {}", renderer.to_string_lossy());
@@ -371,8 +382,10 @@ impl Renderer {
             let mut veo = std::mem::zeroed();
             gl.GenBuffers(1, &mut veo);
 
-            let part_creator = part_creator::PartCreator::new();
+            //let part_creator = semiosnik_creator::SemiosnikCreator::new();
+            let part_creator = osnik_creator::OsnikCreator::new();
             //let part_creator = cube_creator::CubeCreator::new();
+            //let part_creator = nested_cube_creator::CubeCreator::new();
             //let tree_creator = tree_creator::TreeCreator::new();
             //let part_creator = sphere_creator::SphereCreator::new();
             let part_func = &|p| part_creator.get_part_index(p);
@@ -388,18 +401,19 @@ impl Renderer {
             //    &|p: Point| (p.x.abs() < 34.999 && (p.y*p.y + p.z*p.z).sqrt() < 15.0) as u32;
 
             let start = std::time::Instant::now();
-            let mut cc = ContourCreator::new(512, 320.0, 20);
+            let mut cc = ContourCreator::new(1024, 320.0, 20);
 
             for i in 0..part_creator.faces() {
                 let contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
 
                 for (index, mut cc) in contours {
                     cc.optimize(0.02);
-                    let ex = cc.extrude(2.0);
+                    let ex = cc.extrude(0.6);
                     for j in 0..ex.len() {
-                        if let Err(msg) = ex[j].save_to_stl(std::path::Path::new(&format!(
-                            "extruded_{i}_{index}_{j}.stl"
-                        ))) {
+                        if let Err(msg) = ex[j].save_to_stl(
+                            &std::path::Path::new("extruded")
+                                .join(format!("extruded_{i}_{index}_{j}.stl")),
+                        ) {
                             println!("{}", msg);
                         }
                     }
@@ -409,10 +423,9 @@ impl Renderer {
                         cc.points_count(),
                         cc.get_square()
                     );
-                    cc.split_to_triangles();
-                    if let Err(msg) =
-                        cc.save_to_dxf(std::path::Path::new(&format!("contour_{i}_{index}.dxf")))
-                    {
+                    if let Err(msg) = cc.save_to_dxf(
+                        &std::path::Path::new("contours").join(format!("contour_{i}_{index}.dxf")),
+                    ) {
                         println!("{}", msg);
                     }
                 }
@@ -420,9 +433,9 @@ impl Renderer {
 
             let mut mc = ModelCreator::new(128, 130.0, 20, 0, part_func);
             let width = 0.05;
-            while !mc.finished() {
-                mc.fill_next_layer(part_func);
-            }
+           while !mc.finished() {
+               mc.fill_next_layer(part_func);
+             }
 
             let end_layers = std::time::Instant::now();
 
@@ -437,17 +450,16 @@ impl Renderer {
             for (&m_index, m) in &mut models {
                 sum_v += m.vertices.len();
                 max_v = std::cmp::max(max_v, m.vertices.len());
-                //m.validate_and_delete_small_groups();
+                 m.validate_and_delete_small_groups();
                 let smooth_cnt = 2;
                 for i in 0..smooth_cnt {
                     m.smooth(0.4);
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-                //m.optimize(width, 0.999, 10, 0.99);
+               // m.optimize(width, 0.999, 10, 0.99);
                 println!("tcount after {}", m.triangles.len());
                 m.delete_unused_v();
-                m.out_of_center(0.0);
 
                 sum_v_after += m.vertices.len();
                 max_v_after = std::cmp::max(max_v_after, m.vertices.len());
@@ -457,9 +469,9 @@ impl Renderer {
                     m.vertices.len(),
                     m.triangles.len()
                 );
-                if let Err(msg) =
-                    m.save_to_stl(std::path::Path::new(&format!("output_{}.stl", m_index)))
-                {
+                if let Err(msg) = m.save_to_stl(
+                    &std::path::Path::new("output").join(format!("output_{}.stl", m_index)),
+                ) {
                     println!("{}", msg);
                 }
             }
@@ -497,22 +509,31 @@ impl Renderer {
             );
 
             let pos_attrib = gl.GetAttribLocation(program, b"position\0".as_ptr() as *const _);
+            let center_attrib = gl.GetAttribLocation(program, b"center\0".as_ptr() as *const _);
             let color_attrib = gl.GetAttribLocation(program, b"color\0".as_ptr() as *const _);
             gl.VertexAttribPointer(
                 pos_attrib as gl::types::GLuint,
                 3,
                 gl::FLOAT,
                 0,
-                6 * std::mem::size_of::<f32>() as gl::types::GLsizei,
+                9 * std::mem::size_of::<f32>() as gl::types::GLsizei,
                 std::ptr::null(),
+            );
+            gl.VertexAttribPointer(
+                center_attrib as gl::types::GLuint,
+                3,
+                gl::FLOAT,
+                0,
+                9 * std::mem::size_of::<f32>() as gl::types::GLsizei,
+                (3 * std::mem::size_of::<f32>()) as _,
             );
             gl.VertexAttribPointer(
                 color_attrib as gl::types::GLuint,
                 3,
                 gl::FLOAT,
                 0,
-                6 * std::mem::size_of::<f32>() as gl::types::GLsizei,
-                (3 * std::mem::size_of::<f32>()) as _,
+                9 * std::mem::size_of::<f32>() as gl::types::GLsizei,
+                (6 * std::mem::size_of::<f32>()) as _,
             );
 
             gl.BindBuffer(gl::ELEMENT_ARRAY_BUFFER, veo);
@@ -523,6 +544,7 @@ impl Renderer {
                 gl::STATIC_DRAW,
             );
             gl.EnableVertexAttribArray(pos_attrib as gl::types::GLuint);
+            gl.EnableVertexAttribArray(center_attrib as gl::types::GLuint);
             gl.EnableVertexAttribArray(color_attrib as gl::types::GLuint);
 
             let mut camera_position = CameraPosition::default();
@@ -535,6 +557,7 @@ impl Renderer {
                 veo,
                 proj_matrix: Matrix::new_proj(std::f32::consts::FRAC_PI_8, 1.0, 1000.0, 0.01),
                 view_matrix: Matrix::new_view(Point { x: 0.0, y: 0.0, z: 1.0 }, 0.0, 0.0),
+                shift: 0.0,
                 index_count: array_buffer.i.len(),
                 prev_time: std::time::Instant::now(),
                 input_state: InputState::default(),
@@ -618,6 +641,11 @@ impl Renderer {
                 gl::FALSE,
                 self.view_matrix.as_ptr() as *const _,
             );
+
+            let shift_location = self
+                .gl
+                .GetUniformLocation(self.program, b"shift\0".as_ptr() as *const _);
+            self.gl.Uniform1f(shift_location, self.shift);
 
             self.gl.ClearColor(1.0, 1.0, 1.0, 1.0);
             self.gl.Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
@@ -724,8 +752,10 @@ precision mediump float;
 
 uniform mat4 proj;
 uniform mat4 view;
+uniform float shift;
 
 attribute vec3 position;
+attribute vec3 center;
 attribute vec3 color;
 
 varying vec3 v_color;
@@ -734,7 +764,7 @@ varying vec3 v_initial_pos;
 
 void main() {
     v_initial_pos = position;
-    gl_Position = proj * (view * vec4(position, 1.0));
+    gl_Position = proj * (view * vec4(position + center * shift, 1.0));
     v_color = color;
     v_pos = gl_Position.xyz;
 }

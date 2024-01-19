@@ -9,6 +9,8 @@ pub struct Node {
 pub struct TreeCreator {
     rng: rand::rngs::ThreadRng,
     nodes: Vec<Node>,
+    wall: Vec<crate::points2d::Point>,
+    h: Vec<i32>,
 }
 
 pub fn sqr(x: f32) -> f32 {
@@ -64,7 +66,7 @@ impl TreeCreator {
     }
 
     pub fn new() -> Self {
-        let mut result = Self { rng: rand::thread_rng(), nodes: Vec::new() };
+        let mut result = Self { rng: rand::thread_rng(), nodes: Vec::new(), wall: Vec::new(), h: Vec::new() };
         result.generate(
             Point { x: 0.0, y: 0.0, z: -18.0 },
             Point { x: 0.0, y: 0.0, z: 1.5 },
@@ -72,14 +74,115 @@ impl TreeCreator {
             0.98,
         );
         result
+            .wall
+            .push(crate::points2d::Point { x: 30.0, y: -50.0 });
+        result
+            .wall
+            .push(crate::points2d::Point { x: 60.0, y: 25.0 });
+        result
+            .wall
+            .push(crate::points2d::Point { x: -30.0, y: 40.0 });
+        result
+            .wall
+            .push(crate::points2d::Point { x: -60.0, y: 0.0 });
+        result
+            .wall
+            .push(crate::points2d::Point { x: -40.0, y: -40.0 });
+        for w in &mut result.wall {
+            *w = w.scale(0.5);
+        }
+        result.h.resize(result.wall.len(), 0);
+        for h in &mut result.h {
+            *h += result.rng.gen_range(-1 ..=2) * 2;
+        }
+        result
     }
 
     pub fn get_part_index(&self, pos: Point) -> PartIndex {
-        if pos.x.abs() > 34.999 || pos.y.abs() > 34.999 || pos.z.abs() > 34.999 {
+        if pos.x.abs() > 129.999 || pos.y.abs() > 129.999 || pos.z.abs() > 129.999 {
             return 0;
         }
         if pos.z < -20.0 {
             return 0;
+        }
+
+        let proj = crate::points2d::Point { x: pos.x, y: pos.y };
+
+        let layer_shift = f32::min(0.0, (((pos.z + 100.0) * 0.5).fract() - 0.5).abs() - 0.2);
+        let odd_level = ((pos.z + 100.0) * 0.25 + 0.25).fract() < 0.5;
+
+        let mut in_footing = true;
+        let mut prev = *self.wall.last().unwrap() - proj;
+        for &w in &self.wall {
+            let cur = w - proj;
+            if crate::points2d::cross(prev, cur) < 0.0 {
+                in_footing = false;
+                break;
+            }
+            prev = cur;
+        }
+
+        if pos.z < -16.0 {
+            if in_footing {
+                return 1;
+            }
+        } else {
+            for &w in &self.wall {
+                if (w - proj).len() < 5.0 {
+                    return 0;
+                }
+            }
+        }
+
+        for wi in 0..self.wall.len() - 1 {
+            let p1 = self.wall[wi];
+            let p2 = self.wall[wi + 1];
+            let dst = crate::points2d::dist_pl(proj, p1, p2);
+
+            let mut brick_part = crate::points2d::dot(proj - p1, p2 - p1) / (p2 - p1).len() * 0.25;
+            if odd_level {
+                brick_part += 0.5;
+            }
+
+            let brick_part = f32::min(0.0, (brick_part.fract() - 0.5).abs() - 0.2);
+            let w = 8.0;
+            let w = w + 3.0 * f32::min(brick_part, layer_shift);
+
+            if pos.z < 1.0 && w - dst > (pos.z + 20.0) * 0.2 {
+                return 1;
+            }
+        }
+
+        for i in 0 .. self.wall.len() {
+            let w = self.wall[i];
+            let dw = w - proj;
+            let a = f32::atan2(dw.y, dw.x) + std::f32::consts::PI * 2.0;
+            let a_part = a / std::f32::consts::PI * 4.0;
+
+            let h = self.h[i] as f32 + 16.0;
+            
+            let dst = dw.len();
+            let w = if pos.z < h - 12.0 {
+                12.0
+            } else if pos.z < h - 6.0 {
+                (pos.z - (h - 12.0)) * 2.0 / 3.0 + 12.0
+            } else {
+                16.0
+            };
+
+            let mut brick_part = a / std::f32::consts::PI * 8.0;
+            if odd_level {
+                brick_part += 0.5;
+            }
+
+            let brick_part = f32::min(0.0, (brick_part.fract() - 0.5).abs() - 0.2);
+            let w = w + 3.0 * f32::min(brick_part, layer_shift);
+
+            if pos.z < h - 2.0 && w - dst > (pos.z + 20.0) * 0.2 {
+                if pos.z < h - 5.0 || (dst > 6.0 && a_part.fract() < 0.5) {
+                    return 1;
+                }
+            }
         }
 
         for node in &self.nodes {
@@ -88,10 +191,6 @@ impl TreeCreator {
             if delta.sqr_len() < sqr(node.r) {
                 return 1;
             }
-        }
-
-        if pos.z < -16.0 && pos.x.abs() < 10.0 && pos.y.abs() < 10.0 {
-            return 1;
         }
 
         let ely = sqr(pos.y) + sqr(pos.z + 5.0) * 0.25;

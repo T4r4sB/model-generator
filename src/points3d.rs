@@ -113,3 +113,22 @@ pub fn find_root(
         }
     }
 }
+
+pub fn dist_pl(p: Point, p1: Point, p2: Point) -> f32 {
+    let p12 = p2 - p1;
+    let l = p12.len();
+    let p1 = p1 - p;
+    let p2 = p2 - p;
+    if l == 0.0 {
+        return p2.len();
+    }
+    let p12 = p12.scale(l.recip());
+    let d = dot(p2, p12);
+    if d <= 0.0 {
+        p2.len()
+    } else if d >= l {
+        p1.len()
+    } else {
+        cross(p1, p12).len()
+    }
+}

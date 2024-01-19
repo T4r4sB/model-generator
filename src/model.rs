@@ -15,10 +15,18 @@ pub struct Model {
     pub free_vertices: Vec<u32>,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct VecNextInfo {
+    pub v: u32,
+    pub f_left: u32,
+    pub f_right: u32,
+}
+
 #[derive(Debug, Default)]
 pub struct MeshTopology {
     edge_to_face: FxHashMap<(u32, u32), (u32, u32)>,
     face_adj: Vec<[u32; 3]>,
+    v_next: Vec<Vec<VecNextInfo>>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,15 +50,19 @@ impl Model {
     }
 
     pub fn write_to_buffer(&self, buffer: &mut ArrayBuffer, color: u32) {
-        buffer.v.reserve(buffer.v.len() + self.vertices.len() * 6);
+        buffer.v.reserve(buffer.v.len() + self.vertices.len() * 9);
         buffer.i.reserve(buffer.i.len() + self.triangles.len() * 3);
 
-        let old_v_len = (buffer.v.len() / 6) as u32;
+        let old_v_len = (buffer.v.len() / 9) as u32;
+        let c = self.center();
 
         for v in &self.vertices {
             buffer.v.push(v.x);
-            buffer.v.push(v.y);
             buffer.v.push(v.z);
+            buffer.v.push(v.y);
+            buffer.v.push(c.x);
+            buffer.v.push(c.z);
+            buffer.v.push(c.y);
             buffer.v.push((color >> 16 & 0xff) as f32 / 255.0);
             buffer.v.push((color >> 8 & 0xff) as f32 / 255.0);
             buffer.v.push((color & 0xff) as f32 / 255.0);
@@ -102,6 +114,8 @@ impl Model {
 
     pub fn get_topology(&self) -> MeshTopology {
         let mut edge_to_face = FxHashMap::<(u32, u32), (u32, u32)>::default();
+        let mut v_next = Vec::new();
+        v_next.resize(self.vertices.len(), Vec::new());
         const BAD_INDEX: u32 = u32::MAX;
         let mut make_edge = |t, v1, v2| {
             if v1 < v2 {
@@ -137,14 +151,38 @@ impl Model {
         }
 
         let mut bad = false;
-        for ((v1, v2), (f1, f2)) in &edge_to_face {
-            if *f1 == BAD_INDEX || *f2 == BAD_INDEX {
+        for (&(v1, v2), &(f1, f2)) in &edge_to_face {
+            if f1 == BAD_INDEX || f2 == BAD_INDEX {
                 println!("v1={}, v2={}, f1={}, f2={}", v1, v2, f1, f2);
                 bad = true;
             }
+
+            v_next[v1 as usize].push(VecNextInfo { v: v2, f_left: f1, f_right: f2 });
+            v_next[v2 as usize].push(VecNextInfo { v: v1, f_left: f2, f_right: f1 });
         }
         if bad {
             panic!("mesh is incomplete");
+        }
+
+        for v in &mut v_next {
+            if v.len() == 0 {
+                continue;
+            }
+            let mut m = FxHashMap::default();
+            for i in 0..v.len() {
+                m.insert(v[i].f_left, i);
+            }
+            let mut v_after = Vec::new();
+            let mut i = 0;
+            loop {
+                v_after.push(v[i]);
+                i = *m.get(&v[i].f_right).unwrap();
+                if i == 0 {
+                    break;
+                }
+            }
+            assert!(v.len() == v_after.len());
+            *v = v_after;
         }
 
         let mut face_adj = Vec::<[u32; 3]>::new();
@@ -165,7 +203,7 @@ impl Model {
             use_edge(&mut face_adj[i][2], t.2, t.0);
         }
 
-        MeshTopology { edge_to_face, face_adj }
+        MeshTopology { edge_to_face, face_adj, v_next }
     }
 
     pub fn v_near_t(&self, v_index: u32, t: Triangle, eps: f32) -> bool {
@@ -210,6 +248,321 @@ impl Model {
         }
 
         v0.sqr_len() < eps * eps || v1.sqr_len() < eps * eps || v2.sqr_len() < eps * eps
+    }
+
+    pub fn optimize2(&mut self, width: f32, group_dot: f32) {
+        let mut top = self.get_topology();
+        let mut group_of_t = Vec::<u32>::new();
+        group_of_t.resize(self.triangles.len(), 0);
+        let mut normals = Vec::new();
+        normals.resize(self.triangles.len(), Point::zero());
+        let mut group_counts = Vec::<u32>::new();
+
+        normals.push(Point::zero());
+
+        // Stage1: split all faces to groups
+        for ti in 0..self.triangles.len() {
+            if group_of_t[ti] != 0 {
+                continue;
+            }
+
+            group_counts.push(0);
+            let group_index = group_counts.len() as u32;
+            group_of_t[ti] = group_index;
+            *group_counts.last_mut().unwrap() += 1;
+
+            let cn = self.get_normal(self.triangles[ti]);
+            normals[group_index as usize] = cn;
+            let mut d_min = dot(self.vertices[self.triangles[ti].0 as usize], cn);
+            let mut d_max = d_min;
+
+            let mut stack = Vec::<u32>::new();
+            stack.push(ti as u32);
+            while let Some(cur_ti) = stack.pop() {
+                for new_ti in top.face_adj[cur_ti as usize] {
+                    if group_of_t[new_ti as usize] != 0 {
+                        continue;
+                    }
+
+                    let t = self.triangles[new_ti as usize];
+
+                    let d0 = dot(self.vertices[t.0 as usize], cn);
+                    let d1 = dot(self.vertices[t.1 as usize], cn);
+                    let d2 = dot(self.vertices[t.2 as usize], cn);
+                    let new_d_min = f32::min(d0, f32::min(d1, d2));
+                    let new_d_min = f32::min(new_d_min, d_min);
+                    let new_d_max = f32::max(d0, f32::max(d1, d2));
+                    let new_d_max = f32::max(new_d_max, d_max);
+
+                    if new_d_max - new_d_min > width {
+                        continue;
+                    }
+
+                    let nn = self.get_normal(self.triangles[new_ti as usize]);
+                    if dot(nn, cn) <= group_dot {
+                        continue;
+                    }
+
+                    d_min = new_d_min;
+                    d_max = new_d_max;
+
+                    group_of_t[new_ti as usize] = group_index;
+                    *group_counts.last_mut().unwrap() += 1;
+                    stack.push(new_ti);
+                }
+            }
+        }
+
+        // Stage2: get contour chains
+        for v in &mut top.v_next {
+            let mut v_after = Vec::new();
+            for n in &mut *v {
+                n.f_left = group_of_t[n.f_left as usize];
+                n.f_right = group_of_t[n.f_right as usize];
+                if n.f_left != n.f_right {
+                    v_after.push(*n);
+                }
+            }
+            *v = v_after;
+        }
+
+        let mut edge_to_chain = FxHashMap::<(usize, usize), (usize, bool)>::default();
+        let mut next_chain = FxHashMap::<(usize, bool), (usize, bool)>::default();
+        let mut chain_of_f = Vec::<Vec<(usize, bool)>>::new();
+        chain_of_f.resize(group_counts.len() + 1, Vec::new());
+        let mut chains = Vec::new();
+
+        for i in 0..top.v_next.len() {
+            let v = &top.v_next[i];
+            if v.len() > 2 {
+                for n in &*v {
+                    let e = edge_to_chain.entry((i, n.v as usize));
+                    let e = match e {
+                        std::collections::hash_map::Entry::Occupied(_) => continue,
+                        std::collections::hash_map::Entry::Vacant(e) => e,
+                    };
+
+                    let mut chain = Vec::new();
+                    let new_chain_index = chains.len();
+                    e.insert((new_chain_index, false));
+
+                    chain.push(i as u32);
+                    chain.push(n.v);
+                    let mut prev_vi = i as u32;
+                    let mut vi = n.v;
+
+                    chain_of_f[n.f_right as usize].push((new_chain_index, false));
+                    chain_of_f[n.f_left as usize].push((new_chain_index, true));
+
+                    loop {
+                        let cur_vi = &top.v_next[vi as usize];
+                        if cur_vi.len() > 2 {
+                            let old = edge_to_chain
+                                .insert((vi as usize, prev_vi as usize), (new_chain_index, true));
+                            assert!(old.is_none());
+                            break;
+                        }
+
+                        prev_vi = vi;
+                        if cur_vi[0].f_left == n.f_left {
+                            assert!(cur_vi[0].f_right == n.f_right);
+                            assert!(cur_vi[1].f_left == n.f_right);
+                            assert!(cur_vi[1].f_right == n.f_left);
+                            vi = cur_vi[0].v;
+                        } else {
+                            assert!(cur_vi[0].f_left == n.f_right);
+                            assert!(cur_vi[0].f_right == n.f_left);
+                            assert!(cur_vi[1].f_left == n.f_left);
+                            assert!(cur_vi[1].f_right == n.f_right);
+                            vi = cur_vi[1].v;
+                        }
+                        chain.push(vi);
+                    }
+
+                    chains.push(chain);
+                }
+            }
+        }
+
+        for i in 0..top.v_next.len() {
+            let v = &top.v_next[i];
+            if v.len() > 2 {
+                let mut prev_chain = *edge_to_chain
+                    .get(&(i, v.last().unwrap().v as usize))
+                    .unwrap();
+                for nv in &*v {
+                    let cur_chain = *edge_to_chain.get(&(i, nv.v as usize)).unwrap();
+                    let old = next_chain.insert(prev_chain, cur_chain);
+                    assert!(old.is_none());
+                    prev_chain = cur_chain;
+                }
+            }
+        }
+
+        // Stage3: optimize chains
+        /*
+        for c in &mut chains {
+            let mut indices: Vec<usize> = (0..c.len()).collect();
+            loop {
+                let mut changed = false;
+                let mut indices_after = Vec::new();
+                indices_after.push(indices[0]);
+                let mut prev_skipped = false;
+                for i in 1..indices.len() - 1 {
+                    if prev_skipped {
+                        prev_skipped = false;
+                        indices_after.push(indices[i]);
+                        continue;
+                    }
+                    let mut can_skip = true;
+                    let i1 = indices[i - 1];
+                    let i2 = indices[i + 1];
+                    let p1 = self.vertices[c[i1] as usize];
+                    let p2 = self.vertices[c[i2] as usize];
+                    for mi in i1 + 1..i2 {
+                        let mp = self.vertices[c[mi] as usize];
+                        if dist_pl(mp, p1, p2) > width {
+                            can_skip = false;
+                            break;
+                        }
+                    }
+
+                    if can_skip {
+                        changed = true;
+                        prev_skipped = true;
+                    } else {
+                        indices_after.push(indices[i]);
+                    }
+                }
+                indices_after.push(*indices.last().unwrap());
+
+                if changed {
+                    indices = indices_after;
+                } else {
+                    break;
+                }
+            }
+            *c = indices.into_iter().map(|i| c[i]).collect();
+        }*/
+
+        let mut fixed_triangles = Vec::new();
+        // Stage4: for each mega-face collect contours
+        for i in 0..chain_of_f.len() {
+            let c = &chain_of_f[i];
+            if c.is_empty() {
+                continue;
+            }
+            let mut fixed_chains = Vec::new();
+            let mut used = FxHashSet::default();
+            for j in 0..c.len() {
+                let mut fixed_chain = Vec::new();
+                if !used.insert(c[j]) {
+                    continue;
+                }
+                let chain = c[j];
+                let mut nc = chain;
+                loop {
+                    fixed_chain.push(nc);
+                    nc = *next_chain.get(&nc).unwrap();
+                    nc.1 = !nc.1;
+                    if nc == chain {
+                        break;
+                    }
+                    let inserted = used.insert(nc);
+                    assert!(inserted);
+                }
+                fixed_chains.push(fixed_chain);
+            }
+
+            let mut part = crate::ConnectedPart::new();
+            // Handle fixed chain
+            for cn in &fixed_chains {
+                let mut contour = crate::Contour::new();
+                let last_ch = cn.last().unwrap();
+                let mut prev_v = if last_ch.1 {
+                    *chains[last_ch.0].last().unwrap()
+                } else {
+                    chains[last_ch.0][0]
+                };
+                for ch in &*cn {
+                    let chain = &chains[ch.0];
+                    let control = if ch.1 {
+                        chain[0]
+                    } else {
+                        *chain.last().unwrap()
+                    };
+                    assert!(control == prev_v);
+                    prev_v = if ch.1 {
+                        *chain.last().unwrap()
+                    } else {
+                        chain[0]
+                    };
+
+                    if ch.1 {
+                        for i in 0..chain.len() - 1 {
+                            contour.points.push(chain[i]);
+                        }
+                    } else {
+                        for i in 0..chain.len() - 1 {
+                            contour.points.push(chain[chain.len() - 1 - i]);
+                        }
+                    }
+                }
+                part.contours.push(contour);
+            }
+
+            // Make points dense
+            let mut mapped = Vec::new();
+            let mut buffer = Vec::new();
+            let mut mapping = FxHashMap::<u32, u32>::default();
+            let n = normals[i];
+            let n1 = n.any_perp().norm();
+            let n2 = cross(n, n1).norm();
+            for p in &mut part.contours {
+                for pi in &mut *p.points {
+                    let e = mapping.entry(*pi);
+                    let e = match e {
+                        std::collections::hash_map::Entry::Occupied(o) => {
+                            *pi = *o.get();
+                            continue;
+                        }
+                        std::collections::hash_map::Entry::Vacant(e) => e,
+                    };
+                    let new_index = mapped.len() as u32;
+                    mapped.push(*pi);
+                    e.insert(new_index);
+                    let p = self.vertices[*pi as usize];
+                    buffer.push(crate::points2d::Point { x: dot(p, n1), y: dot(p, n2) });
+                    *pi = new_index;
+                }
+            }
+
+            match std::panic::catch_unwind(|| part.clone().split_to_triangles(&buffer)) {
+                Ok(triangles) => {
+                    for t in triangles {
+                        assert!(t.contours.len() == 1);
+                        let c = &t.contours[0];
+                        assert!(c.points.len() == 3);
+                        fixed_triangles.push(Triangle(
+                            mapped[c.points[0] as usize],
+                            mapped[c.points[1] as usize],
+                            mapped[c.points[2] as usize],
+                        ));
+                    }
+                }
+                Err(e) => {
+                    let to_save =
+                        crate::ContourSet { points: buffer.clone(), parts: vec![part.clone()] };
+                    let _ = to_save.save_to_dxf(std::path::Path::new("failed_start.dxf"));
+                    let triangles = part.clone().split_to_triangles_impl(&buffer, true);
+                    panic!("failed to split to triangles");
+                }
+            }
+        }
+
+        self.triangles = fixed_triangles;
+
+        //self.triangles = new_triangles;
     }
 
     pub fn optimize(&mut self, width: f32, group_dot: f32, min_group_size: u32, smooth_dot: f32) {
@@ -687,14 +1040,18 @@ impl Model {
         mappings.into_iter().map(|(_, m)| m.m).collect()
     }
 
-    pub fn out_of_center(&mut self, factor: f32) {
+    pub fn center(&self) -> Point {
         let mut sum = Point::zero();
         for v in &self.vertices {
             sum += *v;
         }
-        sum = sum.scale(1.0 / self.vertices.len() as f32);
+        sum.scale(1.0 / self.vertices.len() as f32)
+    }
+
+    pub fn out_of_center(&mut self, factor: f32) {
+        let c = self.center();
         for v in &mut self.vertices {
-            *v += sum.scale(factor);
+            *v += c.scale(factor);
         }
     }
 

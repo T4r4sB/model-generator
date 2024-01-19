@@ -1,6 +1,6 @@
 use crate::model::*;
 use crate::points3d::*;
-use std::collections::HashMap;
+use fxhash::{FxHashMap, FxHashSet};
 
 pub type PartIndex = u32;
 const BAD_INDEX: PartIndex = 0xFFFFFFFF;
@@ -182,7 +182,7 @@ impl SolidLayer {
 pub struct ModelCreator {
     size: usize,
     solid_size: f32,
-    models: HashMap<PartIndex, Model>,
+    models: FxHashMap<PartIndex, Model>,
     prev_layer: SolidLayer,
     cur_layer: SolidLayer,
     next_layer: SolidLayer,
@@ -204,7 +204,7 @@ impl ModelCreator {
         let mut result = Self {
             size,
             solid_size,
-            models: HashMap::new(),
+            models: FxHashMap::default(),
             prev_layer: SolidLayer::default(),
             cur_layer: SolidLayer::default(),
             next_layer: SolidLayer::default(),
@@ -221,7 +221,7 @@ impl ModelCreator {
         result
     }
 
-    pub fn get_models(self) -> HashMap<PartIndex, Model> {
+    pub fn get_models(self) -> FxHashMap<PartIndex, Model> {
         self.models
     }
 
