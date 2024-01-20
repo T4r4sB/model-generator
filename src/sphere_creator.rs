@@ -5,8 +5,7 @@ use crate::solid::*;
 use std::cell::RefCell;
 use std::ops::DerefMut;
 
-pub struct SphereCreator {
-}
+pub struct SphereCreator {}
 
 pub fn sqr(x: f32) -> f32 {
     x * x
@@ -14,16 +13,18 @@ pub fn sqr(x: f32) -> f32 {
 
 impl SphereCreator {
     pub fn new() -> Self {
-   
-
-        Self {  }
+        Self {}
     }
 
     pub fn faces(&self) -> usize {
         0
     }
 
-    pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
+    pub fn get_sticker_index(
+        &self,
+        pos: crate::points2d::Point,
+        current_normal: usize,
+    ) -> PartIndex {
         0
     }
 
@@ -31,17 +32,32 @@ impl SphereCreator {
         if pos.z < -3.0 || pos.z > 3.0 {
             return 0;
         }
-        
+
         if pos.x.abs() < 10.0 {
-            if dist_pl(pos, Point{x: 10.0, y: 17.0, z:0.0}, Point{x: -10.0, y: 17.0, z:0.0}) < 3.0 {
-                return 1;
-            }
-            
-            if dist_pl(pos, Point{x: -5.0, y: -17.0, z:0.0}, Point{x: -10.0, y: -17.0, z:0.0}) < 3.0 {
+            if dist_pl(
+                pos,
+                Point { x: 10.0, y: 17.0, z: 0.0 },
+                Point { x: -10.0, y: 17.0, z: 0.0 },
+            ) < 3.0
+            {
                 return 1;
             }
 
-            if dist_pl(pos, Point{x: 5.0, y: -17.0, z:0.0}, Point{x: 10.0, y: -17.0, z:0.0}) < 3.0 {
+            if dist_pl(
+                pos,
+                Point { x: -5.0, y: -17.0, z: 0.0 },
+                Point { x: -10.0, y: -17.0, z: 0.0 },
+            ) < 3.0
+            {
+                return 1;
+            }
+
+            if dist_pl(
+                pos,
+                Point { x: 5.0, y: -17.0, z: 0.0 },
+                Point { x: 10.0, y: -17.0, z: 0.0 },
+            ) < 3.0
+            {
                 return 1;
             }
         }

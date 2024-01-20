@@ -44,12 +44,12 @@ impl OsnikCreator {
         let sqrt5 = 5.0f32.sqrt();
 
         let axis = vec![
-            Point { x: 2.0 / 3.0, y: 0.0, z: sqrt5 / 3.0 },
-            Point { x: -1.0 / 3.0, y: 1.0 / sqrt3, z: sqrt5 / 3.0 },
-            Point { x: -1.0 / 3.0, y: -1.0 / sqrt3, z: sqrt5 / 3.0 },
-            Point { x: -2.0 / 3.0, y: 0.0, z: -sqrt5 / 3.0 },
-            Point { x: 1.0 / 3.0, y: -1.0 / sqrt3, z: -sqrt5 / 3.0 },
-            Point { x: 1.0 / 3.0, y: 1.0 / sqrt3, z: -sqrt5 / 3.0 },
+            Point { x: -sqrt5 / 3.0, y: 2.0 / 3.0, z: 0.0 },
+            Point { x: -sqrt5 / 3.0, y: -1.0 / 3.0, z: -1.0 / sqrt3 },
+            Point { x: -sqrt5 / 3.0, y: -1.0 / 3.0, z: 1.0 / sqrt3 },
+            Point { x: sqrt5 / 3.0, y: -2.0 / 3.0, z: 0.0 },
+            Point { x: sqrt5 / 3.0, y: 1.0 / 3.0, z: 1.0 / sqrt3 },
+            Point { x: sqrt5 / 3.0, y: 1.0 / 3.0, z: -1.0 / sqrt3 },
         ];
 
         fn find4(n1: Point, n2: Point) -> Point {

@@ -64,7 +64,11 @@ impl CubeCreator {
         self.get_part_index_impl(pos, self.normals.len())
     }
 
-    pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
+    pub fn get_sticker_index(
+        &self,
+        pos: crate::points2d::Point,
+        current_normal: usize,
+    ) -> PartIndex {
         let n = self.normals[current_normal];
         let (n1, n2) = self.n_basis[current_normal];
         let pos = n.scale(35.0 / n.sqr_len()) + n1.scale(pos.x) + n2.scale(pos.y);

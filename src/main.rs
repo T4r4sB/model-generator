@@ -35,8 +35,8 @@ mod contour;
 use crate::contour::*;
 mod cube_creator;
 mod nested_cube_creator;
-mod semiosnik_creator;
 mod osnik_creator;
+mod semiosnik_creator;
 mod sphere_creator;
 mod tree_creator;
 
@@ -433,9 +433,9 @@ impl Renderer {
 
             let mut mc = ModelCreator::new(128, 130.0, 20, 0, part_func);
             let width = 0.05;
-           while !mc.finished() {
-               mc.fill_next_layer(part_func);
-             }
+            while !mc.finished() {
+                mc.fill_next_layer(part_func);
+            }
 
             let end_layers = std::time::Instant::now();
 
@@ -450,14 +450,14 @@ impl Renderer {
             for (&m_index, m) in &mut models {
                 sum_v += m.vertices.len();
                 max_v = std::cmp::max(max_v, m.vertices.len());
-                 m.validate_and_delete_small_groups();
+                m.validate_and_delete_small_groups();
                 let smooth_cnt = 2;
                 for i in 0..smooth_cnt {
                     m.smooth(0.4);
                     println!("make model smooth, progress [{i}/{smooth_cnt}]");
                 }
                 println!("tcount before = {}", m.triangles.len());
-               // m.optimize(width, 0.999, 10, 0.99);
+                // m.optimize(width, 0.999, 10, 0.99);
                 println!("tcount after {}", m.triangles.len());
                 m.delete_unused_v();
 

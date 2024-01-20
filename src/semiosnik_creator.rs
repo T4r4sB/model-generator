@@ -113,7 +113,7 @@ impl SemiosnikCreator {
         let axis_pos = RefCell::new(Vec::new());
         let axis_neg = RefCell::new(Vec::new());
 
-        let long_edges = vec![            
+        let long_edges = vec![
             1 << 0 | 1 << 3,
             1 << 1 | 1 << 2,
             1 << 0 | 1 << 5,

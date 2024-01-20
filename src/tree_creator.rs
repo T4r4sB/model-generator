@@ -66,7 +66,8 @@ impl TreeCreator {
     }
 
     pub fn new() -> Self {
-        let mut result = Self { rng: rand::thread_rng(), nodes: Vec::new(), wall: Vec::new(), h: Vec::new() };
+        let mut result =
+            Self { rng: rand::thread_rng(), nodes: Vec::new(), wall: Vec::new(), h: Vec::new() };
         result.generate(
             Point { x: 0.0, y: 0.0, z: -18.0 },
             Point { x: 0.0, y: 0.0, z: 1.5 },
@@ -93,7 +94,7 @@ impl TreeCreator {
         }
         result.h.resize(result.wall.len(), 0);
         for h in &mut result.h {
-            *h += result.rng.gen_range(-1 ..=2) * 2;
+            *h += result.rng.gen_range(-1..=2) * 2;
         }
         result
     }
@@ -153,14 +154,14 @@ impl TreeCreator {
             }
         }
 
-        for i in 0 .. self.wall.len() {
+        for i in 0..self.wall.len() {
             let w = self.wall[i];
             let dw = w - proj;
             let a = f32::atan2(dw.y, dw.x) + std::f32::consts::PI * 2.0;
             let a_part = a / std::f32::consts::PI * 4.0;
 
             let h = self.h[i] as f32 + 16.0;
-            
+
             let dst = dw.len();
             let w = if pos.z < h - 12.0 {
                 12.0
