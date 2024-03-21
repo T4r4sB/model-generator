@@ -23,16 +23,20 @@ pub struct DecaminxCreator {
 
 impl DecaminxCreator {
   pub fn new() -> Self {
-    let min_angle = 0.7619934;
-    let max_angle = 1.0945351;
+    let e_cos = 2.0f32.sqrt() - 1.0;
+    let min_angle = ((2.0 * 2.0f32.sqrt() + 1.0) / 7.0).sqrt().acos();
+    let max_angle = (-e_cos).acos() * 0.5;
     let ball_radius: f32 = 18.0;
+
     let split_angle = min_angle + 4.0 / ball_radius;
     let split2_angle = min_angle + 1.0 / ball_radius;
 
-    // Wolfram alpha: u^2+v^2+w^2=1, w=2*u^2-1, w^2=u*v
-    let u = 0.8539500706724498779;
-    let v = 0.24613487960998085;
-    let w = 0.458461446402964282;
+    let e_sin = (1.0 - e_cos * e_cos).sqrt();
+    let (c8, s8) = (std::f32::consts::PI * 0.125).sin_cos();
+
+    let u = e_sin * c8;
+    let v = e_sin * s8;
+    let w = e_cos;
 
     let axis = vec![
       Point { x: 0.0, y: 0.0, z: 1.0 },
@@ -68,7 +72,6 @@ impl DecaminxCreator {
   }
 
   pub fn get_part_index_impl(&self, pos: Point, current_normal: usize) -> PartIndex {
-   
     let r = pos.len();
     let depth = self.ball_radius - r;
     if depth > 4.0 {
@@ -188,7 +191,7 @@ impl DecaminxCreator {
       }
     }
 
-    if index != 1 && index != 8 { return 0; }
+    if index != 96  { return 0; }
 
     if index.count_ones() == 1 {
       if depth > 3.8 {

@@ -33,6 +33,12 @@ impl Point {
   pub fn perp(self) -> Self {
     Self { x: self.y, y: -self.x }
   }
+
+  pub fn reflect(self, pt1: Point, pt2: Point) -> Self {
+    let delta = (pt2 - pt1).perp().norm();
+    let d = dot(delta, self - pt1);
+    self - delta.scale(d * 2.0)
+  }
 }
 
 impl std::ops::Add for Point {

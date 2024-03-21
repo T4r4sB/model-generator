@@ -102,6 +102,7 @@ impl DiskCreator {
 
   pub fn get_part_index(&self, pos: Point) -> PartIndex {
     if pos.z < 0.0 {
+      return 0;
       if pos.z > -4.0 {
         let sz = f32::max(0.0, (pos.z + 2.0).abs() - 1.5) * 0.5;
         let proj = crate::points2d::Point { x: pos.x, y: pos.y };
@@ -187,12 +188,11 @@ impl DiskCreator {
       }
       return 1;
     } else if pos.z < 7.5 {
-      return 0;
       let z = pos.z - 2.5;
       let proj = crate::points2d::Point { x: pos.x, y: pos.y };
       let mut ok = false;
       for (i, &d) in self.disk_centers.iter().enumerate() {
-        if i != 1 { continue; }
+        if i < 8 { continue; }
         let d = proj - d;
         let state = self.disk_states_b[i];
 
@@ -258,7 +258,6 @@ impl DiskCreator {
             }
           }
         }
-        break;
       }
     } else if pos.z < 16.5 {
       return 0;    

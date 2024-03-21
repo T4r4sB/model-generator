@@ -42,8 +42,14 @@ use crate::contour::*;
 // mod sphere_creator;
 // mod sun_kitty_creator;
 
-// mod decaminx_creator;
-// type PartCreator = decaminx_creator::DecaminxCreator;
+//mod decaminx_creator;
+//type PartCreator = decaminx_creator::DecaminxCreator;
+
+//mod decaminx_o_creator;
+//type PartCreator = decaminx_o_creator::DecaminxCreator;
+
+//mod octo_mixup_creator;
+//type PartCreator = octo_mixup_creator::OctoMixupCreator;
 
 //mod pyra5_creator;
 //type PartCreator = pyra5_creator::Pyra5Creator;
@@ -63,11 +69,17 @@ use crate::contour::*;
 //mod tree_creator;
 //type PartCreator = tree_creator::TreeCreator;
 
-mod disk_creator;
-type PartCreator = disk_creator::DiskCreator;
+// mod disk_creator;
+// type PartCreator = disk_creator::DiskCreator;
 
 //mod brake_handle_creator;
 //type PartCreator = brake_handle_creator::BrakeHandleCreator;
+
+//mod roach_creator;
+//type PartCreator = roach_creator::RoachCreator;
+
+mod house_creator;
+type PartCreator = house_creator::HouseCreator;
 
 pub mod gl {
   #![allow(clippy::all)]
@@ -426,7 +438,7 @@ impl Renderer {
         }
       }
 
-      let mut mc = ModelCreator::new(512, 160.0, 20, 0, part_func);
+      let mut mc = ModelCreator::new(128, 100.0, 20, 0, part_func);
       let width = 0.05;
       while !mc.finished() {
         mc.fill_next_layer(part_func);
