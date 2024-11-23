@@ -1,0 +1,12 @@
+[package]
+name = "common"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+stl_io = "0.7.0"
+fxhash = "0.2.1"
+dxf = { version = "0.5.0", features = ["serialize"] }
+rand = "0.8.5"
