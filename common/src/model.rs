@@ -535,8 +535,6 @@ impl Model {
     }
 
     self.triangles = fixed_triangles;
-
-    //self.triangles = new_triangles;
   }
 
   pub fn optimize(&mut self, width: f32, group_dot: f32, min_group_size: u32, smooth_dot: f32) {

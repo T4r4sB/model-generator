@@ -1,10 +1,12 @@
 #![allow(unused)]
 
 use common::contour::*;
+use std::time::Instant;
+
 mod clickbox2_creator;
 type PartCreator = clickbox2_creator::ClickboxCreator;
-
 fn main() {
+  let start = Instant::now();
   let part_creator = PartCreator::new();
 
   let mut cc = ContourCreator::new(1024, 400.0, 20);
@@ -60,4 +62,5 @@ fn main() {
   }
 
   println!("total {total_length} length, {total_square} square");
+  println!("time {}", start.elapsed().as_millis() as f32 / 1000.0);
 }

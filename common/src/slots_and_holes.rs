@@ -96,19 +96,19 @@ pub fn in_riga_logo(pos: Point) -> bool {
   false
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HoleID(usize);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct HoleArcID(usize);
 
 #[derive(Copy, Clone, Debug)]
 pub struct ConnectorID(usize);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SlotID(usize);
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SlotArcID(usize);
 
 #[derive(Copy, Clone, Debug)]
@@ -171,8 +171,8 @@ impl Builder {
     if !hole.has_border {
       hole.border = self.default_border;
     }
-    if !hole.has_gauntlet_width {
-      hole.gauntlet_width = hole.border;
+    if !hole.has_oval_width {
+      hole.oval_width = hole.border;
     }
     if hole.r > 0.0 {
       hole.r += self.error;
@@ -182,8 +182,8 @@ impl Builder {
     if hole.border > 0.0 {
       hole.border -= self.error * 1.0;
     }
-    if hole.gauntlet_width > 0.0 {
-      hole.gauntlet_width -= self.error * 1.0;
+    if hole.oval_width > 0.0 {
+      hole.oval_width -= self.error * 1.0;
     }
     self.holes.push(hole);
     result
@@ -534,13 +534,13 @@ impl SlotArc {
     };
 
     let get_c = |d: f32, p: f32, dl: f32| -> Point {
-      let p = get_p(d, p);
+      let p = get_p(d, p) - center;
 
       let l = p.len();
       if l == 0.0 {
-        Point::X.scale(dl)
+        Point::X.scale(dl) + center
       } else {
-        p.scale(1.0 + dl / l)
+        p.scale(1.0 + dl / l) + center
       }
     };
 
@@ -593,7 +593,6 @@ impl SlotArc {
         let pt2 = get_c(0.0, width * 0.5, slot_dist);
         let pt3 = get_c(length, -width * 0.5, slot_dist);
         let pt4 = get_c(length, width * 0.5, slot_dist);
-        println!("suka {:?}, {:?}, {:?}, {:?}, {:?}", ptm, pt1, pt2, pt3, pt4);
         control_lines.push(ControlLine::new(&params, ptm, pt1));
         control_lines.push(ControlLine::new(&params, ptm, pt2));
         control_lines.push(ControlLine::new(&params, ptm, pt3));
@@ -690,43 +689,22 @@ pub struct Hole {
   center: Point,
   r: f32,
   border: f32,
-  gauntlet_width: f32,
+  oval_width: f32,
   has_border: bool,
-  has_gauntlet_width: bool,
+  has_oval_width: bool,
 }
 
 impl Hole {
   pub fn new(center: Point, r: f32) -> Self {
-    Self {
-      center,
-      r,
-      border: 0.0,
-      gauntlet_width: 0.0,
-      has_border: false,
-      has_gauntlet_width: false,
-    }
+    Self { center, r, border: 0.0, oval_width: 0.0, has_border: false, has_oval_width: false }
   }
 
   pub fn new_no_border(center: Point, r: f32) -> Self {
-    Self {
-      center,
-      r,
-      border: 0.0,
-      gauntlet_width: 0.0,
-      has_border: true,
-      has_gauntlet_width: false,
-    }
+    Self { center, r, border: 0.0, oval_width: 0.0, has_border: true, has_oval_width: false }
   }
 
   pub fn new_solid(center: Point, r: f32) -> Self {
-    Self {
-      center,
-      r: 0.0,
-      border: r,
-      gauntlet_width: 0.0,
-      has_border: true,
-      has_gauntlet_width: false,
-    }
+    Self { center, r: 0.0, border: r, oval_width: 0.0, has_border: true, has_oval_width: false }
   }
 
   pub fn rotate(mut self, center: Point, angle: f32) -> Self {
@@ -741,9 +719,9 @@ impl Hole {
     self
   }
 
-  pub fn gauntlet_width(mut self, gauntlet_width: f32) -> Self {
-    self.gauntlet_width = gauntlet_width;
-    self.has_gauntlet_width = true;
+  pub fn oval_width(mut self, oval_width: f32) -> Self {
+    self.oval_width = oval_width;
+    self.has_oval_width = true;
     self
   }
 
@@ -759,7 +737,7 @@ impl Hole {
   }
 
   fn figure_contour_part(&self) -> FigureContourPart {
-    FigureContourPart { center: self.center, r: self.gauntlet_width }
+    FigureContourPart { center: self.center, r: self.oval_width }
   }
 }
 
@@ -1020,14 +998,39 @@ struct FigureContourPart {
   r: f32,
 }
 
-impl FigureContourPart {
-  fn in_gauntlet(&self, prev: &FigureContourPart, pt: Point) -> f32 {
-    let w_mid = (prev.r + self.r) * 0.5;
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Layout {
+  Begin,
+  Middle,
+  End,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AnyID {
+  HoleID(HoleID),
+  HoleArcID(HoleArcID, Layout),
+  SlotID(SlotID, Layout),
+  SlotArcID(SlotArcID, Layout),
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+struct OvalKey(AnyID, AnyID);
+
+#[derive(Debug)]
+struct Oval {
+  first: FigureContourPart,
+  second: FigureContourPart,
+  // some helper fields to improve computations
+}
+
+impl Oval {
+  fn border_func(&self, pt: Point) -> f32 {
+    let w_mid = (self.first.r + self.second.r) * 0.5;
     if w_mid < 0.01 {
       return 2.0;
     };
-    let delta = self.center - prev.center;
-    let rel_p = pt - prev.center;
+    let delta = self.second.center - self.first.center;
+    let rel_p = pt - self.first.center;
     let len = delta.len();
     assert!(len > 0.01);
     let inv_len = len.recip();
@@ -1036,25 +1039,10 @@ impl FigureContourPart {
     let t_check = f32::max(0.0, (t - len * 0.5).abs() - len * 0.5 + w_mid) / w_mid;
 
     let d = cross(rel_p, delta).abs() * inv_len;
-    let lin = d / (prev.r + t * inv_len * (self.r - prev.r));
+    let lin = d / (self.first.r + t * inv_len * (self.second.r - self.first.r));
 
     return sm_max(&[t_check, lin]);
   }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum Layout {
-  Begin,
-  Middle,
-  End,
-}
-
-#[derive(Debug, Copy, Clone)]
-pub enum AnyID {
-  HoleID(HoleID),
-  HoleArcID(HoleArcID, Layout),
-  SlotID(SlotID, Layout),
-  SlotArcID(SlotArcID, Layout),
 }
 
 impl AnyID {
@@ -1161,21 +1149,17 @@ pub struct FigureContourPreparingInfo {
 }
 
 #[derive(Debug)]
-pub struct FigureContour {
-  positions: Vec<FigureContourPart>,
-  kind: FigureContourKind,
+pub struct Filled {
+  corners: Vec<Point>,
 }
 
-impl FigureContour {
+impl Filled {
   pub fn contains(&self, point: Point) -> bool {
-    if self.kind != FigureContourKind::Filled || self.positions.is_empty() {
-      return false;
-    }
     let mut c_in = 0;
     let mut c_out = 0;
-    let mut prev = self.positions[self.positions.len() - 1].center - point;
-    for i in 0..self.positions.len() {
-      let cur = self.positions[i].center - point;
+    let mut prev = self.corners[self.corners.len() - 1] - point;
+    for i in 0..self.corners.len() {
+      let cur = self.corners[i] - point;
       if prev.y >= 0.0 && cur.y < 0.0 && cross(prev, cur) <= 0.0 {
         c_in += 1;
       } else if prev.y < 0.0 && cur.y >= 0.0 && cross(prev, cur) > 0.0 {
@@ -1189,64 +1173,96 @@ impl FigureContour {
 
 #[derive(Debug)]
 pub struct Figure {
-  contours: Vec<FigureContour>,
+  filleds: Vec<Filled>,
   holes: Vec<HoleID>,
   hole_arcs: Vec<HoleArcID>,
   slots: Vec<SlotID>,
   slot_arcs: Vec<SlotArcID>,
+  ovals: Vec<Oval>,
   name: Option<String>,
   count: usize,
 }
 
 impl Figure {
+  fn get_part(builder: &Builder, part_id: AnyID) -> FigureContourPart {
+    match part_id {
+      AnyID::HoleID(h) => builder.get_hole(h).figure_contour_part(),
+      AnyID::HoleArcID(h, layout) => builder.get_hole_arc(h).figure_contour_part(layout),
+      AnyID::SlotID(s, layout) => builder.get_slot(s).figure_contour_part(layout),
+      AnyID::SlotArcID(s, layout) => builder.get_slot_arc(s).figure_contour_part(layout),
+    }
+  }
+
   pub fn new(builder: &Builder, contours: &[FigureContourPreparingInfo]) -> Self {
     let mut holes = Vec::<HoleID>::new();
     let mut hole_arcs = Vec::<HoleArcID>::new();
     let mut slots = Vec::<SlotID>::new();
     let mut slot_arcs = Vec::<SlotArcID>::new();
+    let mut filleds = Vec::<Filled>::new();
+    let mut oval_keys = Vec::<OvalKey>::new();
 
-    let contours = contours
+    for c in contours {
+      if c.positions.is_empty() {
+        continue;
+      }
+      for p in &c.positions {
+        match p {
+          AnyID::HoleID(h) => {
+            holes.push(*h);
+          }
+          AnyID::HoleArcID(h, _) => {
+            hole_arcs.push(*h);
+          }
+          AnyID::SlotID(s, _) => {
+            slots.push(*s);
+          }
+          AnyID::SlotArcID(s, _) => {
+            slot_arcs.push(*s);
+          }
+        }
+      }
+
+      if c.kind == FigureContourKind::Filled {
+        let mut corners = Vec::<Point>::new();
+        for &p in &c.positions {
+          corners.push(Self::get_part(builder, p).center);
+        }
+        filleds.push(Filled { corners });
+      } else {
+        let mut prev = if c.kind == FigureContourKind::Chain { None } else { c.positions.last() };
+        for p in &c.positions {
+          if let Some(prev) = prev {
+            let mut g = if prev < p { OvalKey(*prev, *p) } else { OvalKey(*p, *prev) };
+            oval_keys.push(g);
+          }
+          prev = Some(p);
+        }
+      }
+    }
+
+    holes.sort();
+    holes.dedup();
+    hole_arcs.sort();
+    hole_arcs.dedup();
+    slots.sort();
+    slots.dedup();
+    slot_arcs.sort();
+    slot_arcs.dedup();
+    oval_keys.sort();
+    oval_keys.dedup();
+    let ovals = oval_keys
       .iter()
-      .map(|c| FigureContour {
-        positions: c
-          .positions
-          .iter()
-          .map(|&p| match p {
-            AnyID::HoleID(h) => {
-              holes.push(h);
-              builder.get_hole(h).figure_contour_part()
-            }
-            AnyID::HoleArcID(h, layout) => {
-              hole_arcs.push(h);
-              builder.get_hole_arc(h).figure_contour_part(layout)
-            }
-            AnyID::SlotID(s, layout) => {
-              slots.push(s);
-              builder.get_slot(s).figure_contour_part(layout)
-            }
-            AnyID::SlotArcID(s, layout) => {
-              slot_arcs.push(s);
-              builder.get_slot_arc(s).figure_contour_part(layout)
-            }
-          })
-          .collect(),
-        kind: c.kind,
+      .map(|&OvalKey(p1, p2)| {
+        let p1 = Self::get_part(builder, p1);
+        let p2 = Self::get_part(builder, p2);
+        Oval { first: p1, second: p2 }
       })
       .collect();
-
-    holes.sort_by_key(|h| h.0);
-    holes.dedup_by_key(|h| h.0);
-    hole_arcs.sort_by_key(|h| h.0);
-    hole_arcs.dedup_by_key(|h| h.0);
-    slots.sort_by_key(|s| s.0);
-    slots.dedup_by_key(|s| s.0);
-    slot_arcs.sort_by_key(|s| s.0);
-    slot_arcs.dedup_by_key(|s| s.0);
 
     let name = None;
     let count = 1;
 
-    Self { contours, holes, hole_arcs, slots, slot_arcs, name, count }
+    Self { holes, hole_arcs, slots, slot_arcs, filleds, ovals, name, count }
   }
 
   pub fn name(mut self, name: String) -> Self {
@@ -1285,7 +1301,7 @@ impl Figure {
       }
     }
 
-    for c in &self.contours {
+    for c in &self.filleds {
       if c.contains(pt) {
         return true;
       }
@@ -1305,18 +1321,10 @@ impl Figure {
       v.push(s.border_func(pt));
     }
 
-    for c in &self.contours {
-      let mut prev = c.positions.last().unwrap();
-      let mut check_g = c.kind != FigureContourKind::Chain;
-      for h in &c.positions {
-        if check_g {
-          let g = h.in_gauntlet(prev, pt);
-          assert!(!g.is_nan());
-          v.push(g);
-        }
-        prev = h;
-        check_g = true;
-      }
+    for o in &self.ovals {
+      let g = o.border_func(pt);
+      assert!(!g.is_nan());
+      v.push(g);
     }
 
     sm_min(&v) < 1.0

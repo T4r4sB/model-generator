@@ -633,6 +633,8 @@ impl ContourSet {
     for p in &mut self.parts {
       p.remove_trash(&self.points)
     }
+
+    self.parts.retain(|p| p.contours.len() > 0);
   }
 
   pub fn split_to_triangles(&mut self) {
