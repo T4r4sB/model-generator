@@ -349,7 +349,7 @@ impl Renderer {
       let part_func = &|p| part_creator.get_part_index(p);
 
       let start = std::time::Instant::now();
-      let mut cc = ContourCreator::new(1024, 400.0, 20);
+      let mut cc = ContourCreator::new(points2d::AABB::around_zero(100.0), 0.3, 20);
 
       let mut total_length = 0.0;
       let mut total_square = 0.0;

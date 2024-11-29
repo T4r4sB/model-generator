@@ -136,3 +136,64 @@ pub fn dist_pl(p: Point, p1: Point, p2: Point) -> f32 {
     cross(p1, p12).abs()
   }
 }
+
+#[derive(Copy, Clone, Debug)]
+pub struct AABB {
+  pub x1: f32,
+  pub y1: f32,
+  pub x2: f32,
+  pub y2: f32,
+}
+
+impl AABB {
+  pub fn empty() -> Self {
+    Self { x1: f32::INFINITY, y1: f32::INFINITY, x2: -f32::INFINITY, y2: -f32::INFINITY }
+  }
+
+  pub fn around(center: Point, r: f32) -> Self {
+    Self { x1: center.x - r, y1: center.y - r, x2: center.x + r, y2: center.y + r }
+  }
+
+  pub fn around_zero(r: f32) -> Self {
+    Self { x1: -r, y1: -r, x2: r, y2: r }
+  }
+
+  pub fn from(pts: &[Point]) -> Self {
+    let mut result = Self::empty();
+
+    for &p in pts {
+      result.x1 = f32::min(result.x1, p.x);
+      result.y1 = f32::min(result.y1, p.y);
+      result.x2 = f32::max(result.x2, p.x);
+      result.y2 = f32::max(result.y2, p.y);
+    }
+
+    result
+  }
+
+  pub fn rounded(self, r: f32) -> Self {
+    Self { x1: self.x1 - r, y1: self.y1 - r, x2: self.x2 + r, y2: self.y2 + r }
+  }
+
+  pub fn with(self, rhs: Point) -> Self {
+    Self {
+      x1: f32::min(self.x1, rhs.x),
+      y1: f32::min(self.y1, rhs.y),
+      x2: f32::max(self.x2, rhs.x),
+      y2: f32::max(self.y2, rhs.y),
+    }
+  }
+
+  pub fn combine(self, rhs: Self) -> Self {
+    Self {
+      x1: f32::min(self.x1, rhs.x1),
+      y1: f32::min(self.y1, rhs.y1),
+      x2: f32::max(self.x2, rhs.x2),
+      y2: f32::max(self.y2, rhs.y2),
+    }
+  }
+
+  pub fn contains(&self, pt: Point) -> bool {
+    pt.y >= self.y1 && pt.y < self.y2 && pt.x >= self.x1 && pt.x < self.x2
+  }
+}

@@ -253,7 +253,7 @@ impl ClickboxParams {
         6.0,
         &[(0.0, 6.0)],
       )
-      .width(2.4),
+      .width(2.8),
     );
     let axle_pipe_outer_rail_slot = builder.add_slot(Slot::new_no_border(
       Point { x: self.pipe_r + 2.0, y: -1.0 - self.height * 0.5 },
@@ -953,7 +953,6 @@ impl ClickboxParams {
     add_crank_out_stuff(builder, 0.0, in_result);
     let in_result = add_crank_in_stuff(builder, 1.0);
     add_crank_out_stuff(builder, 1.0, in_result);
-    return;
 
     builder.add_figure(
       Figure::new(
@@ -1179,16 +1178,16 @@ impl DrumCreator {
     5
   }
 
-  pub fn get_height(&self, current_normal: usize) -> f32 {
-    if current_normal == 4 {
+  pub fn get_height(&self, part_index: usize) -> f32 {
+    if part_index == 4 {
       2.5
     } else {
       2.0
     }
   }
 
-  pub fn get_name(&self, current_normal: usize) -> Option<&str> {
-    match current_normal {
+  pub fn get_name(&self, part_index: usize) -> Option<&str> {
+    match part_index {
       0 => Some("drum_program"),
       1 => Some("drum_bottom_cable"),
       2 => Some("drum_top_cable"),
@@ -1197,11 +1196,15 @@ impl DrumCreator {
     }
   }
 
-  pub fn get_count(&self, current_normal: usize) -> usize {
+  pub fn get_count(&self, part_index: usize) -> usize {
     1
   }
 
-  pub fn get_sticker_index(&self, pos: Point, current_normal: usize) -> PartIndex {
+  pub fn aabb(&self,  part_index: usize) -> AABB {
+    AABB::around_zero(self.max_r)
+  }
+
+  pub fn get_sticker_index(&self, pos: Point, part_index: usize) -> PartIndex {
     fn near_nut(p: Point, nut: Point, error: f32) -> bool {
       let p = p - nut;
       let nut = nut.norm();
@@ -1223,7 +1226,7 @@ impl DrumCreator {
       return true;
     }
 
-    match current_normal {
+    match part_index {
       0 => {
         if pos.len() < 3.5 + self.error || pos.len() > self.max_r {
           return 0;
@@ -1368,35 +1371,43 @@ impl ClickboxCreator {
     self.builder.contour_count() + self.drum.faces()
   }
 
-  pub fn get_height(&self, current_normal: usize) -> f32 {
-    if current_normal < self.builder.contour_count() {
-      self.builder.get_material_thickness(current_normal)
+  pub fn get_height(&self, part_index: usize) -> f32 {
+    if part_index < self.builder.contour_count() {
+      self.builder.get_material_thickness(part_index)
     } else {
-      self.drum.get_height(current_normal - self.builder.contour_count())
+      self.drum.get_height(part_index - self.builder.contour_count())
     }
   }
 
-  pub fn get_name(&self, current_normal: usize) -> Option<&str> {
-    if current_normal < self.builder.contour_count() {
-      self.builder.get_name(current_normal)
+  pub fn get_name(&self, part_index: usize) -> Option<&str> {
+    if part_index < self.builder.contour_count() {
+      self.builder.get_name(part_index)
     } else {
-      self.drum.get_name(current_normal - self.builder.contour_count())
+      self.drum.get_name(part_index - self.builder.contour_count())
     }
   }
 
-  pub fn get_count(&self, current_normal: usize) -> usize {
-    if current_normal < self.builder.contour_count() {
-      self.builder.get_count(current_normal)
+  pub fn get_count(&self, part_index: usize) -> usize {
+    if part_index < self.builder.contour_count() {
+      self.builder.get_count(part_index)
     } else {
-      self.drum.get_count(current_normal - self.builder.contour_count())
+      self.drum.get_count(part_index - self.builder.contour_count())
     }
   }
 
-  pub fn get_sticker_index(&self, pos: Point, current_normal: usize) -> PartIndex {
-    if current_normal < self.builder.contour_count() {
-      self.builder.contains(current_normal, pos) as PartIndex
+  pub fn get_sticker_index(&self, pos: Point, part_index: usize) -> PartIndex {
+    if part_index < self.builder.contour_count() {
+      self.builder.contains(part_index, pos) as PartIndex
     } else {
-      self.drum.get_sticker_index(pos, current_normal - self.builder.contour_count())
+      self.drum.get_sticker_index(pos, part_index - self.builder.contour_count())
+    }
+  }
+
+  pub fn aabb(&self, part_index: usize) -> Option<AABB> {
+    if part_index < self.builder.contour_count() {
+      Some(self.builder.aabb(part_index))
+    } else {
+      Some(self.drum.aabb(part_index))
     }
   }
 }

@@ -748,49 +748,44 @@ impl ContourCell {
 
 #[derive(Debug, Clone)]
 pub struct ContourCreator {
-  size: usize,
-  contour_size: f32,
+  aabb: AABB,
+  scale: f32,
+  size_x: usize,
+  size_y: usize,
   tries: usize,
   points: Vec<Point>,
-  cells: Vec<ContourCell>,
 }
 
 impl ContourCreator {
-  pub fn new(size: usize, contour_size: f32, tries: usize) -> Self {
-    Self {
-      size,
-      contour_size,
-      tries,
-      points: Vec::new(),
-      cells: vec![ContourCell::new(); size * size],
-    }
+  pub fn new(aabb: AABB, scale: f32, tries: usize) -> Self {
+    let size_x = ((aabb.x2 - aabb.x1) / scale).ceil() as usize + 1;
+    let size_y = ((aabb.y2 - aabb.y1) / scale).ceil() as usize + 1;
+    Self { aabb, scale, size_x, size_y, tries, points: Vec::new() }
   }
 
-  fn index_to_point(size: usize, contour_size: f32, x: usize, y: usize) -> Point {
-    let scale = contour_size / (size as f32 - 1.0);
+  fn index_to_point(&self, x: usize, y: usize) -> Point {
     Point {
-      x: x as f32 * scale * 0.5 - contour_size * 0.5,
-      y: y as f32 * scale * 0.5 - contour_size * 0.5,
+      x: x as f32 * self.scale * 0.5 + self.aabb.x1,
+      y: y as f32 * self.scale * 0.5 + self.aabb.y1,
     }
   }
 
-  fn center_of_cell(size: usize, contour_size: f32, x: usize, y: usize) -> Point {
-    Self::index_to_point(size, contour_size, x * 2 - 1, y * 2 - 1)
+  fn center_of_cell(&self, x: usize, y: usize) -> Point {
+    self.index_to_point(x * 2 - 1, y * 2 - 1)
   }
 
-  fn corner_of_cell(size: usize, contour_size: f32, x: usize, y: usize) -> Point {
-    Self::index_to_point(size, contour_size, x * 2, y * 2)
+  fn corner_of_cell(&self, x: usize, y: usize) -> Point {
+    self.index_to_point(x * 2, y * 2)
   }
 
   fn fill_cell(
-    size: usize,
-    contour_size: f32,
+    &self,
     cell: &mut ContourCell,
     x: usize,
     y: usize,
     part_f: &dyn Fn(Point) -> PartIndex,
   ) {
-    cell.pos = Self::corner_of_cell(size, contour_size, x, y);
+    cell.pos = self.corner_of_cell(x, y);
     cell.index = part_f(cell.pos);
   }
 
@@ -856,12 +851,13 @@ impl ContourCreator {
     &mut self,
     part_f: &dyn Fn(Point) -> PartIndex,
   ) -> HashMap<PartIndex, ContourSet> {
-    if self.size == 0 {
+    if self.size_x == 0 || self.size_y == 0 {
       return HashMap::new();
     }
 
-    let cells = &mut self.cells[..];
-    let sz = self.size;
+    let mut cells = vec![ContourCell::new(); self.size_x * self.size_y];
+    let szx = self.size_x;
+    let szy = self.size_y;
 
     let mut result = HashMap::new();
 
@@ -884,32 +880,34 @@ impl ContourCreator {
       };
     }
 
-    Self::fill_cell(sz, self.contour_size, &mut cells[0], 0, 0, part_f);
-    for x in 1..sz {
-      Self::fill_cell(sz, self.contour_size, &mut cells[x], x, 0, part_f);
+    self.fill_cell(&mut cells[0], 0, 0, part_f);
+    for x in 1..szx {
+      self.fill_cell(&mut cells[x], x, 0, part_f);
+
       fill_mids!(x - 1, v_pz, x, v_mz);
     }
 
-    for y in 1..sz {
-      let c = sz * y;
-      let c10 = c - sz;
+    for y in 1..szy {
+      let c = szx * y;
+      let c10 = c - szx;
       let c11 = c;
 
-      Self::fill_cell(sz, self.contour_size, &mut cells[c11], 0, y, part_f);
+      self.fill_cell(&mut cells[c11], 0, y, part_f);
       fill_mids!(c10, v_zp, c11, v_zm);
 
-      for x in 1..sz {
+      for x in 1..szx {
         let c = c + x;
-        let c00 = c - 1 - sz;
-        let c10 = c - sz;
+        let c00 = c - 1 - szx;
+        let c10 = c - szx;
         let c01 = c - 1;
         let c11 = c;
-        Self::fill_cell(sz, self.contour_size, &mut cells[c11], x, y, part_f);
+        self.fill_cell(&mut cells[c11], x, y, part_f);
+
         fill_mids!(c01, v_pz, c11, v_mz);
         fill_mids!(c10, v_zp, c11, v_zm);
 
         // fill cell here
-        let center = Self::center_of_cell(sz, self.contour_size, x, y);
+        let center = self.center_of_cell(x, y);
         let center_index = part_f(center);
 
         let mut v_mmi = BAD_INDEX;

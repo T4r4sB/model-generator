@@ -1,7 +1,9 @@
 #![allow(unused)]
 
 use common::contour::*;
+use common::points2d::*;
 use std::time::Instant;
+use std::io::Write;
 
 mod clickbox2_creator;
 type PartCreator = clickbox2_creator::ClickboxCreator;
@@ -9,15 +11,20 @@ fn main() {
   let start = Instant::now();
   let part_creator = PartCreator::new();
 
-  let mut cc = ContourCreator::new(1024, 400.0, 20);
-
   let mut total_length = 0.0;
   let mut total_square = 0.0;
 
   for i in 0..part_creator.faces() {
+    let aabb = part_creator.aabb(i).unwrap_or(AABB::around_zero(200.0));
+
+    let mut cc = ContourCreator::new(aabb, 0.2, 20);
+
+    let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
+    print!("generate {name}...");
+    std::io::stdout().flush().unwrap();
+
     let contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
     let h = part_creator.get_height(i);
-    let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
 
     let thickness = h;
     let count = part_creator.get_count(i);
@@ -37,7 +44,7 @@ fn main() {
       total_square += square * count as f32;
 
       println!(
-        "save {name} ({} points, {square} square, {length} length) to dxf...",
+        "\rsave {name} ({} points, {square} square, {length} length) to dxf...",
         cc.points_count()
       );
       if let Err(msg) =

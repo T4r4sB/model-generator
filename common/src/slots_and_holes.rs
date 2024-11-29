@@ -7,39 +7,6 @@ pub fn sqr(x: f32) -> f32 {
   x * x
 }
 
-/*
-fn sm_min(x: &[f32]) -> f32 {
-  let mut result = f32::MAX;
-  for &x in x {
-    result = f32::min(result, x);
-  }
-  result
-}
-
-fn sm_max(x: &[f32]) -> f32 {
-  let mut result = f32::MIN;
-  for &x in x {
-    result = f32::max(result, x);
-  }
-  result
-}*/
-
-fn sm_min(x: &[f32]) -> f32 {
-  let mut result = 0.0;
-  for x in x {
-    result += x.powi(-8);
-  }
-  return result.powf(-0.125);
-}
-
-fn sm_max(x: &[f32]) -> f32 {
-  let mut result = 0.0;
-  for x in x {
-    result += x.powi(8);
-  }
-  return result.powf(0.125);
-}
-
 pub fn in_riga_logo(pos: Point) -> bool {
   let pos = pos + Point { x: 8.0, y: 2.5 };
   if dist_pl(pos, Point { x: 0.5, y: 0.5 }, Point { x: 0.5, y: 4.0 }) < 0.5 {
@@ -271,6 +238,14 @@ impl Builder {
     }
   }
 
+  pub fn aabb(&self, index: usize) -> AABB {
+    if index < self.figures.len() {
+      self.get_figure(FigureID(index)).aabb.rounded(0.501)
+    } else {
+      self.get_connector(ConnectorID(index - self.figures.len())).aabb().rounded(0.001)
+    }
+  }
+
   pub fn get_name(&self, index: usize) -> Option<&str> {
     if index < self.figures.len() {
       self.get_figure(FigureID(index)).name.as_ref().map(String::as_str)
@@ -384,7 +359,7 @@ impl Slot {
     false
   }
 
-  fn border_func(&self, pt: Point) -> f32 {
+  fn dist(&self, pt: Point) -> f32 {
     if self.border == 0.0 {
       return 2.0;
     }
@@ -418,7 +393,29 @@ impl Slot {
       f2 - h2
     };
 
-    (sqr(x) + sqr(y)).sqrt() / self.border
+    (sqr(x) + sqr(y)).sqrt() - self.border
+  }
+
+  fn aabb(&self) -> AABB {
+    let h1 = self.hmin() + self.error;
+    let h2 = self.hmax() - self.error;
+
+    let mut m1 = h1;
+    let mut m2 = h2;
+
+    if h1 > h2 {
+      m1 = (h1 + h2) * 0.5;
+      m2 = m1;
+    }
+
+    let get_p =
+      |a: f32, b: f32| self.start + self.direction.scale(a) + self.direction.perp().scale(b);
+
+    let p0 = get_p(h1, (self.width * 0.5 - self.error));
+    let p1 = get_p(h2, (self.width * 0.5 - self.error));
+    let p2 = get_p(h1, -(self.width * 0.5 - self.error));
+    let p3 = get_p(h2, -(self.width * 0.5 - self.error));
+    AABB::from(&[p0, p1, p2, p3]).rounded(self.border)
   }
 
   fn figure_contour_part(&self, layout: Layout) -> FigureContourPart {
@@ -439,8 +436,17 @@ struct LinearFunc {
 }
 
 impl LinearFunc {
-  fn new(pt1: Point, pt2: Point) -> Self {
+  // create normalized linear function gives 0 in both points
+  fn new_00_norm(pt1: Point, pt2: Point) -> Self {
     let n = (pt2 - pt1).norm().perp();
+    let c = -dot(pt1, n);
+    Self { n, c }
+  }
+
+  // create  linear function gives 0 in first point and 1 in second
+  fn new_01(pt1: Point, pt2: Point) -> Self {
+    let n = pt2 - pt1;
+    let n = n.scale(1.0 / n.sqr_len());
     let c = -dot(pt1, n);
     Self { n, c }
   }
@@ -473,9 +479,11 @@ impl ControlLine {
 
     let r_in = pt1.len();
     let r_out = pt2.len();
-    let start = LinearFunc::new(complex_mul(pt2, params.angle1), complex_mul(pt1, params.angle1));
-    let end = LinearFunc::new(complex_mul(pt1, params.angle2), complex_mul(pt2, params.angle2));
-    let mid = LinearFunc::new(
+    let start =
+      LinearFunc::new_00_norm(complex_mul(pt2, params.angle1), complex_mul(pt1, params.angle1));
+    let end =
+      LinearFunc::new_00_norm(complex_mul(pt1, params.angle2), complex_mul(pt2, params.angle2));
+    let mid = LinearFunc::new_00_norm(
       complex_mul(pt1, params.angle_mid_with_cos),
       complex_mul(pt2, params.angle_mid_with_cos),
     );
@@ -729,11 +737,15 @@ impl Hole {
     self.r > 0.0 && (pt - self.center).sqr_len() < sqr(self.r)
   }
 
-  fn border_func(&self, pt: Point) -> f32 {
+  fn dist(&self, pt: Point) -> f32 {
     if self.border == 0.0 {
       return 2.0;
     }
-    (pt - self.center).len() / (self.border + self.r)
+    (pt - self.center).len() - (self.border + self.r)
+  }
+
+  fn aabb(&self) -> AABB {
+    AABB::around(self.center, self.border + self.r)
   }
 
   fn figure_contour_part(&self) -> FigureContourPart {
@@ -811,7 +823,7 @@ impl HoleArc {
     sl > sqr(self.arc_r - self.hole_r) && sl < sqr(self.arc_r + self.hole_r)
   }
 
-  fn border_func(&self, pt: Point) -> f32 {
+  fn dist(&self, pt: Point) -> f32 {
     if self.border == 0.0 {
       return 2.0;
     }
@@ -819,12 +831,23 @@ impl HoleArc {
 
     if !self.pt_inside_angle(pt) {
       f32::min(
-        (pt - self.angle1).len() / (self.border + self.hole_r),
-        (pt - self.angle2).len() / (self.border + self.hole_r),
+        (pt - self.angle1).len() - (self.border + self.hole_r),
+        (pt - self.angle2).len() - (self.border + self.hole_r),
       )
     } else {
-      (pt.len() - self.arc_r).abs() / (self.border + self.hole_r)
+      (pt.len() - self.arc_r).abs() - (self.border + self.hole_r)
     }
+  }
+
+  fn aabb(&self) -> AABB {
+    let mut result = AABB::from(&[self.center + self.angle1, self.center + self.angle2]);
+    for p in [Point::X, Point::Y, -Point::X, -Point::Y] {
+      if self.pt_inside_angle(p) {
+        result = result.with(self.center + p.scale(self.arc_r))
+      }
+    }
+
+    result.rounded(self.border + self.hole_r)
   }
 
   fn figure_contour_part(&self, layout: Layout) -> FigureContourPart {
@@ -934,6 +957,28 @@ impl Connector {
     self
   }
 
+  pub fn aabb(&self) -> AABB {
+    let x1 = 0.0;
+    let x2 = self.length;
+
+    let top_w = self.width * 0.5 + self.couple_size_top;
+    let bottom_w = -self.width * 0.5 - self.couple_size_bottom;
+
+    let mut y1 = bottom_w;
+    let mut y2 = top_w;
+
+    // assume extra layers are not intersected
+    for &(w, _, _) in &self.extra_layers_top {
+      y2 = f32::max(y2, top_w + w);
+    }
+
+    for &(w, _, _) in &self.extra_layers_bottom {
+      y1 = f32::max(y1, bottom_w - w);
+    }
+
+    AABB { x1, y1, x2, y2 }
+  }
+
   pub fn contains(&self, pt: Point, builder: &Builder) -> bool {
     let corrected_pt = Point { x: pt.x + self.error_shift, y: pt.y };
     for &h in &self.holes {
@@ -951,13 +996,13 @@ impl Connector {
 
     for &h in &self.holes {
       let h = builder.get_hole(h);
-      if h.border_func(corrected_pt) < 1.0 {
+      if h.dist(corrected_pt) < 0.0 {
         return true;
       }
     }
     for &s in &self.slots {
       let s = builder.get_slot(s);
-      if s.border_func(corrected_pt) < 1.0 {
+      if s.dist(corrected_pt) < 0.0 {
         return true;
       }
     }
@@ -1021,27 +1066,67 @@ struct Oval {
   first: FigureContourPart,
   second: FigureContourPart,
   // some helper fields to improve computations
+  splitter: LinearFunc,
+  case1: LinearFunc,
+  dist1: LinearFunc,
+  case2: LinearFunc,
+  dist2: LinearFunc,
 }
 
 impl Oval {
-  fn border_func(&self, pt: Point) -> f32 {
-    let w_mid = (self.first.r + self.second.r) * 0.5;
-    if w_mid < 0.01 {
-      return 2.0;
-    };
-    let delta = self.second.center - self.first.center;
-    let rel_p = pt - self.first.center;
-    let len = delta.len();
-    assert!(len > 0.01);
-    let inv_len = len.recip();
+  fn new(first: FigureContourPart, second: FigureContourPart) -> Option<Self> {
+    let splitter = LinearFunc::new_00_norm(first.center, second.center);
 
-    let t = dot(rel_p, delta) * inv_len;
-    let t_check = f32::max(0.0, (t - len * 0.5).abs() - len * 0.5 + w_mid) / w_mid;
+    let delta = first.center - second.center;
+    let tcos = (second.r - first.r) / delta.len();
 
-    let d = cross(rel_p, delta).abs() * inv_len;
-    let lin = d / (self.first.r + t * inv_len * (self.second.r - self.first.r));
+    if tcos.abs() > 1.0 {
+      return None;
+    }
 
-    return sm_max(&[t_check, lin]);
+    let tsin = (1.0 - sqr(tcos)).sqrt();
+
+    let delta = delta.norm();
+    let dir1 = complex_mul(delta, Point { x: tcos, y: tsin });
+    let f1 = first.center + dir1.scale(first.r);
+    let s1 = second.center + dir1.scale(second.r);
+    let dir2 = complex_mul(delta, Point { x: tcos, y: -tsin });
+    let f2 = first.center + dir2.scale(first.r);
+    let s2 = second.center + dir2.scale(second.r);
+
+    let case1 = LinearFunc::new_01(f1, s1);
+    let dist1 = LinearFunc::new_00_norm(f1, s1);
+    let case2 = LinearFunc::new_01(f2, s2);
+    let dist2 = LinearFunc::new_00_norm(s2, f2);
+
+    Some(Self { first, second, splitter, case1, dist1, case2, dist2 })
+  }
+
+  fn dist(&self, pt: Point) -> f32 {
+    if self.splitter.get(pt) > 0.0 {
+      let case = self.case1.get(pt);
+      if case < 0.0 {
+        (pt - self.first.center).len() - self.first.r
+      } else if case < 1.0 {
+        self.dist1.get(pt)
+      } else {
+        (pt - self.second.center).len() - self.second.r
+      }
+    } else {
+      let case = self.case2.get(pt);
+      if case < 0.0 {
+        (pt - self.first.center).len() - self.first.r
+      } else if case < 1.0 {
+        self.dist2.get(pt)
+      } else {
+        (pt - self.second.center).len() - self.second.r
+      }
+    }
+  }
+
+  fn aabb(&self) -> AABB {
+    AABB::around(self.first.center, self.first.r)
+      .combine(AABB::around(self.second.center, self.second.r))
   }
 }
 
@@ -1169,6 +1254,10 @@ impl Filled {
     }
     c_in != c_out
   }
+
+  fn aabb(&self) -> AABB {
+    AABB::from(&self.corners)
+  }
 }
 
 #[derive(Debug)]
@@ -1180,6 +1269,7 @@ pub struct Figure {
   slot_arcs: Vec<SlotArcID>,
   ovals: Vec<Oval>,
   name: Option<String>,
+  aabb: AABB,
   count: usize,
 }
 
@@ -1250,19 +1340,37 @@ impl Figure {
     slot_arcs.dedup();
     oval_keys.sort();
     oval_keys.dedup();
-    let ovals = oval_keys
+
+    let ovals: Vec<Oval> = oval_keys
       .iter()
-      .map(|&OvalKey(p1, p2)| {
+      .filter_map(|&OvalKey(p1, p2)| {
         let p1 = Self::get_part(builder, p1);
         let p2 = Self::get_part(builder, p2);
-        Oval { first: p1, second: p2 }
+        Oval::new(p1, p2)
       })
       .collect();
 
     let name = None;
     let count = 1;
 
-    Self { holes, hole_arcs, slots, slot_arcs, filleds, ovals, name, count }
+    let mut aabb = AABB::empty();
+    for f in &filleds {
+      aabb = aabb.combine(f.aabb());
+    }
+    for &h in &holes {
+      aabb = aabb.combine(builder.get_hole(h).aabb());
+    }
+    for &ha in &hole_arcs {
+      aabb = aabb.combine(builder.get_hole_arc(ha).aabb());
+    }
+    for &s in &slots {
+      aabb = aabb.combine(builder.get_slot(s).aabb());
+    }
+    for o in &ovals {
+      aabb = aabb.combine(o.aabb());
+    }
+
+    Self { holes, hole_arcs, slots, slot_arcs, filleds, ovals, name, aabb, count }
   }
 
   pub fn name(mut self, name: String) -> Self {
@@ -1276,6 +1384,9 @@ impl Figure {
   }
 
   pub fn contains(&self, pt: Point, builder: &Builder) -> bool {
+    if !self.aabb.contains(pt) {
+      return false;
+    }
     for &h in &self.holes {
       let h = builder.get_hole(h);
       if h.hole(pt) {
@@ -1307,26 +1418,43 @@ impl Figure {
       }
     }
 
-    let mut v = Vec::new();
+    let mut sumd = 0.0;
+    let maxd = 0.5;
+
+    let mut use_dist = |d: f32| {
+      if d < 0.0 {
+        return true;
+      }
+      if d < maxd {
+        sumd += sqr(sqr(1.0 - d / maxd));
+      }
+      return false;
+    };
+
     for &h in &self.holes {
       let h = builder.get_hole(h);
-      v.push(h.border_func(pt));
+      if use_dist(h.dist(pt)) {
+        return true;
+      }
     }
     for &ha in &self.hole_arcs {
-      let h = builder.get_hole_arc(ha);
-      v.push(h.border_func(pt));
+      let ha = builder.get_hole_arc(ha);
+      if use_dist(ha.dist(pt)) {
+        return true;
+      }
     }
     for &s in &self.slots {
       let s = builder.get_slot(s);
-      v.push(s.border_func(pt));
+      if use_dist(s.dist(pt)) {
+        return true;
+      }
     }
-
     for o in &self.ovals {
-      let g = o.border_func(pt);
-      assert!(!g.is_nan());
-      v.push(g);
+      if use_dist(o.dist(pt)) {
+        return true;
+      }
     }
 
-    sm_min(&v) < 1.0
+    sumd > 1.0
   }
 }
