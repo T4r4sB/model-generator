@@ -54,6 +54,13 @@ fn find_pp(p1: Point, d1: f32, p2: Point, d2: f32) -> Point {
   p1 + delta.scale(x1 / d) + delta.perp().scale((sqr(d1) - sqr(x1)).sqrt() / d)
 }
 
+fn find_pl(p1: Point, d1: f32, s2: Semiplane, d2: f32) -> Point {
+  let d = dot(p1, s2.n) - s2.c + d2;
+  println!("d={d}, d1={d1}");
+  let h = (sqr(d1) - sqr(d)).sqrt();
+  p1 - s2.n.scale(d) - s2.n.perp().scale(h)
+}
+
 fn find_ll(s1: Semiplane, s2: Semiplane, w: f32) -> Point {
   let det = (s1.n.x * s2.n.y - s2.n.x * s1.n.y).recip();
   let x = (s1.c + w) * s2.n.y - (s2.c + w) * s1.n.y;
@@ -622,9 +629,24 @@ impl ClickboxParams {
     let ro2 = builder.add_hole(Hole::new(self.f_out.1[2], 3.5));
     let ro3 = builder.add_hole(Hole::new(self.f_out.1[3], 3.5));
 
-    let cup_keeper_top_place =
-      find_pp(self.f_out.0, 7.0, self.drum_pos, self.drum_radius + self.depth + 5.0);
-    let cup_keeper_top_hole = builder.add_hole(Hole::new(cup_keeper_top_place, 1.5).border(3.0));
+    let outer_crank_top_hole_r = 5.5;
+    let outer_crank_top_hole_place = find_pp(
+      self.f_out.0,
+      outer_crank_top_hole_r,
+      self.drum_pos,
+      self.drum_radius + self.depth + 4.2,
+    );
+
+    let cup_keeper_bottom_place =
+      find_pl(self.drum_pos, self.drum_radius + self.depth + 2.2, p1, 1.5);
+
+    assert!(
+      (cup_keeper_bottom_place - self.f_out.0).len() > (self.f_out.0 - self.f_out.1[0]).len() + 5.0,
+      "Bottom hole intersects with outer crank roll!"
+    );
+
+    let cup_keeper_bottom_hole =
+      builder.add_hole(Hole::new(cup_keeper_bottom_place, 1.5).border(3.0));
 
     let drum_place =
       builder.add_hole(Hole::new(self.drum_pos, self.drum_radius + self.depth + 0.5 - 2.0));
@@ -695,15 +717,16 @@ impl ClickboxParams {
 
       let outer_pipe =
         builder.add_slot_arc(SlotArc::new_no_border(builder, outer_pipe, 1.0, rot_center, a0, a1s));
-      let rot_hole = builder.add_hole(Hole::new(rot_center, 1.95).border(3.0));
-      let roll_hole = builder.add_hole(Hole::new(roll_center, 1.5).border(3.0));
+      let rot_hole = builder.add_hole(Hole::new(rot_center, 1.95).border(5.0));
+      let roll_hole = builder.add_hole(Hole::new(roll_center, 1.5).border(5.0));
 
       let drum_hole =
         builder.add_hole(Hole::new_no_border(self.drum_pos, self.drum_radius - self.depth + 0.4));
       let drum_arc =
         builder.add_hole_arc(HoleArc::new(builder, drum_hole, 0.0, rot_center, a0, a1));
 
-      let screw_hole = builder.add_hole(Hole::new_no_border(cup_keeper_top_place, 1.9));
+      let screw_hole =
+        builder.add_hole(Hole::new_no_border(self.f_out.0, outer_crank_top_hole_r + 1.5));
       let screw_arc =
         builder.add_hole_arc(HoleArc::new(builder, screw_hole, 0.0, rot_center, a0, a1));
 
@@ -722,11 +745,11 @@ impl ClickboxParams {
         a1s,
       ));
 
-      let dir = complex_mul((contact_pos - rot_center).norm(), Point::from_angle(erra - 0.1));
+      let dir = complex_mul((contact_pos - rot_center).norm(), Point::from_angle(erra - 0.15));
 
       let alt_hole_center = rot_center + dir.scale(9.5);
       let alt_hole_data = Hole::new_no_border(alt_hole_center, 3.5);
-      let alt_hole = builder.add_hole(Hole::new(alt_hole_center, 1.5).border(4.0));
+      let alt_hole = builder.add_hole(Hole::new(alt_hole_center, 1.5).border(5.0));
 
       let alt_slot_1 = builder
         .add_slot(Slot::new(rot_center + dir.scale(2.0), dir, 6.0, &[(1.0, 5.0)]).border(4.0));
@@ -756,8 +779,8 @@ impl ClickboxParams {
         Figure::new(
           builder,
           &[
-            chain![roll_hole, alt_slot_3, rot_hole, alt_hole, contact, contact_down],
-            chain![alt_slot_1, alt_slot_2],
+            chain![roll_hole, rot_hole, alt_hole, contact, contact_down],
+            //chain![alt_slot_1, alt_slot_2, alt_slot_3],
             chain![inner_pipe, outer_pipe],
             chain![drum_arc, screw_arc],
             chain![s3b, s4b, s5b, s6b],
@@ -769,8 +792,8 @@ impl ClickboxParams {
         Figure::new(
           builder,
           &[
-            chain![roll_hole, alt_slot_3, rot_hole, alt_hole],
-            chain![alt_slot_1, alt_slot_2],
+            chain![roll_hole, rot_hole, alt_hole],
+            // chain![alt_slot_1, alt_slot_2, alt_slot_3],
             chain![drum_arc, screw_arc],
             chain![s3b, s4b, s5b, s6b],
           ],
@@ -858,7 +881,7 @@ impl ClickboxParams {
       let drum_screw_arc = builder
         .add_hole_arc(HoleArc::new(builder, drum_screw_hole, 0.0, rot_center, a0, a1).border(3.0));
 
-      let screw_hole = builder.add_hole(Hole::new_no_border(cup_keeper_top_place, 1.9));
+      let screw_hole = builder.add_hole(Hole::new_no_border(cup_keeper_bottom_place, 1.9));
       let screw_arc =
         builder.add_hole_arc(HoleArc::new(builder, screw_hole, 0.0, rot_center, a0, a1));
 
@@ -918,13 +941,15 @@ impl ClickboxParams {
         .border(4.0),
       );
 
+      let top_hole = builder.add_hole(Hole::new(outer_crank_top_hole_place, 1.5).border(3.0));
+
       builder.add_figure(
         Figure::new(
           builder,
           &[
-            contour![rot_hole, alt_hole, roll_hole, drum_screw_arc.end(), drum_screw_arc.begin()],
+            contour![top_hole, rot_hole, roll_hole, drum_screw_arc.end(), drum_screw_arc.begin()],
             chain![drum_screw_arc.begin(), contact_s2_i, contact, contact_up],
-            chain![alt_slot_1, alt_slot_2],
+            // chain![alt_slot_1, alt_slot_2, alt_hole,],
             chain![contact_s1, contact_s2_l, contact_s2_r],
             chain![screw_arc],
             chain![s9b, s0b, s1b, s2b, s3b, s4b, s5b, s6b, srb, srin],
@@ -936,8 +961,8 @@ impl ClickboxParams {
         Figure::new(
           builder,
           &[
-            chain![rot_hole, alt_hole, roll_hole,],
-            chain![alt_slot_1, alt_slot_2],
+            chain![top_hole, rot_hole, roll_hole,],
+            // chain![alt_slot_1, alt_slot_2, alt_hole],
             chain![screw_arc, drum_arc],
             chain![s0b, s1b, s2b, s6b, srb],
           ],
@@ -974,7 +999,7 @@ impl ClickboxParams {
             axle_end_slots.axle_pipe_slot,
             axle_end_slots.axle_end_slot,
             axle_end_slots.axle_hold_slot,
-            cup_keeper_top_hole
+            cup_keeper_bottom_hole
           ],
           chain![
             slots[0], slots[1], slots[2], slots[3], slots[4], slots[5], slots[6], slots[7],
@@ -1006,7 +1031,7 @@ impl ClickboxParams {
             axle_end_slots.axle_pipe_slot,
             axle_end_slots.axle_end_slot,
             axle_end_slots.axle_hold_slot,
-            cup_keeper_top_hole
+            cup_keeper_bottom_hole
           ],
           chain![
             slots[0], slots[1], slots[2], slots[3], slots[4], slots[5], slots[6], slots[7],
@@ -1024,7 +1049,7 @@ impl ClickboxParams {
           chain![top_keep_bolt_hole, cable_slot_1_cup.begin(),],
           chain![cable_slot_2_cup.begin(), top_hole, axle_end_slots.rail_mid_slot_cup],
           chain![axle_end_slots.axle_hold_slot],
-          chain![cr1h_cup, cr2h_cup, drum_place_cup, cup_keeper_top_hole],
+          chain![cr1h_cup, cr2h_cup, drum_place_cup, cup_keeper_bottom_hole],
         ],
       )
       .name("plate_cup".into()),
@@ -1041,7 +1066,7 @@ impl ClickboxParams {
             axle_end_slots.rail_mid_slot_cup
           ],
           chain![axle_end_slots.axle_hold_slot],
-          chain![drum_place_view_cup, cup_keeper_top_hole],
+          chain![drum_place_view_cup, cup_keeper_bottom_hole],
           chain![cr1h_view_cup, cr2h_view_cup],
         ],
       )
@@ -1052,6 +1077,148 @@ impl ClickboxParams {
     let h2 = builder.add_hole(Hole::new(-Point::X.scale(0.0), 2.5).border(3.0));
     let h3 = builder.add_hole(Hole::new(Point::X.scale(10.0), 2.5).border(3.0));
     builder.add_figure(Figure::new(builder, &[chain![h1, h2, h3]]).name("cabler".into()));
+  }
+
+  pub fn make_handle(&self, builder: &mut Builder) {
+    let a = PI * 135.0 / 180.0;
+    let r = 60.0 / a;
+
+    let ap = Point::from_angle(a);
+
+    let drum_mid = builder.add_hole(Hole::new(Point::ZERO, 3.1).border(r - 1.0));
+    let cable_imitation = builder.add_hole(Hole::new_no_border(Point { x: r + 3.0, y: 0.0 }, 3.5));
+    let cable_trajectory =
+      builder.add_hole_arc(HoleArc::new(builder, cable_imitation, 0.0, Point::ZERO, 0.0, a + PI));
+    let slot_start_1 = builder.add_slot(
+      Slot::new_no_border(Point { x: r + 1.0, y: 0.0 }, -Point::Y, 10.0, &[(0.0, 10.0)]).width(6.5),
+    );
+    let slot_start_2 = builder.add_slot(
+      Slot::new_no_border(-ap.scale(r + 1.0), ap.perp(), 10.0, &[(0.0, 10.0)]).width(6.5),
+    );
+
+    let slot_start_1_b = builder.add_slot(
+      Slot::new(Point { x: r, y: 2.0 }, -Point::Y, 10.0, &[(2.0, 7.0)]).width(4.0).border(3.0),
+    );
+    let slot_start_2_b = builder.add_slot(
+      Slot::new(-ap.scale(r) - ap.perp().scale(2.0), ap.perp(), 10.0, &[(2.0, 7.0)])
+        .width(4.0)
+        .border(3.0),
+    );
+
+    let bolt = builder.add_hole(Hole::new(Point { x: 6.0, y: 6.0 }, 1.25));
+    let bolt_op = builder.add_hole(Hole::new(Point { x: -6.0, y: -6.0 }, 1.25));
+
+    let cup_bolt_pos = Point { x: 0.0, y: r + 13.0 - 2.0 - 2.5 };
+    let cup_bolt = builder.add_hole(Hole::new(cup_bolt_pos, 2.5).border(5.0));
+
+    let bolt_far = builder.add_hole(Hole::new_solid(Point { x: 10.0, y: -48.0 }, 4.5));
+    let bolt_far_keep = builder.add_hole(Hole::new_solid(Point { x: 30.0, y: -48.0 }, 5.5));
+
+    let cup_mid = builder.add_hole(Hole::new(Point::ZERO, 2.5).border(2.0));
+    let cup_mid_h = builder.add_hole(Hole::new(Point::ZERO, 2.5).border(8.0));
+    let slot_bor_cables = builder.add_slot(Slot::new(
+      Point { x: -r - 7.0, y: r + 13.0 },
+      Point::X,
+      2.0 * (r + 7.0),
+      &[(2.0, 12.0), (r + 3.0, r + 11.0), (r * 2.0 + 2.0, r * 2.0 + 12.0)],
+    ));
+
+    let slot_bor_cables_1 = builder.add_slot(
+      Slot::new_no_border(Point { x: -r - 17.0, y: r + 15.0 }, Point::X, 24.0, &[(0.0, 24.0)])
+        .width(2.5),
+    );
+
+    let slot_bor_cables_2 = builder.add_slot(
+      Slot::new_no_border(Point { x: r + 17.0, y: r + 15.0 }, -Point::X, 24.0, &[(0.0, 24.0)])
+        .width(2.5),
+    );
+
+    let slot_for_keeper =
+      builder.add_slot(Slot::new(Point { x: r + 8.0, y: -23.0 }, Point::Y, 46.0, &[(12.0, 34.0)]));
+
+    let slot_for_ribbon = builder.add_slot(
+      Slot::new(Point { x: r + 6.25, y: -8.5 }, Point::Y, 27.0, &[(2.0, 15.0)]).width(2.0),
+    );
+
+    let cable_slot_hole1 = builder.add_hole(Hole::new(Point { x: 7.0, y: 0.0 }, 5.0));
+    let cable_slot_rope1 = builder.add_slot(Slot::new_no_border(
+      Point { x: 7.0, y: 0.0 },
+      -Point::X,
+      10.0,
+      &[(0.0, 10.0)],
+    ));
+    let cable_slot_hole2 = builder.add_hole(Hole::new(Point { x: 7.0 + r * 2.0, y: 0.0 }, 5.0));
+    let cable_slot_rope2 = builder.add_slot(Slot::new_no_border(
+      Point { x: 7.0 + r * 2.0, y: 0.0 },
+      Point::X,
+      10.0,
+      &[(0.0, 10.0)],
+    ));
+
+    builder.add_connector(
+      Connector::new(builder, slot_bor_cables, 10.0)
+        .holes(&[cable_slot_hole1, cable_slot_hole2])
+        //  .slots(&[cable_slot_rope1, cable_slot_rope2])
+        .name("handle_slot_for_cables".into()),
+    );
+    builder.add_connector(
+      Connector::new(builder, slot_for_keeper, 10.0).name("handle_slot_for_keeper".into()),
+    );
+
+    builder.add_figure(
+      Figure::new(
+        &builder,
+        &[
+          chain![bolt_op, drum_mid, bolt],
+          chain![cable_trajectory],
+          chain![slot_start_1],
+          chain![slot_start_2],
+        ],
+      )
+      .name("handle_drum".into()),
+    );
+
+    builder.add_figure(
+      Figure::new(
+        &builder,
+        &[
+          chain![bolt_op, drum_mid, bolt],
+          chain![slot_start_1_b, bolt_far, bolt_far_keep],
+          chain![slot_start_2_b],
+        ],
+      )
+      .name("handle_drum_keep_with_handle".into()),
+    );
+
+    builder.add_figure(
+      Figure::new(
+        &builder,
+        &[chain![bolt_op, drum_mid, bolt], chain![slot_start_1_b], chain![slot_start_2_b]],
+      )
+      .name("handle_drum_keep".into()),
+    );
+
+    builder.add_figure(
+      Figure::new(
+        &builder,
+        &[
+          contour![cup_mid, slot_bor_cables.end()],
+          contour![slot_bor_cables, slot_for_keeper],
+          contour![
+            cup_mid,
+            slot_bor_cables.begin(),
+            slot_bor_cables.end(),
+            slot_for_keeper.end(),
+            slot_for_keeper.begin(),
+          ],
+          chain![cup_mid_h],
+          chain![cup_bolt],
+          chain![slot_bor_cables_1, slot_bor_cables_2, slot_for_ribbon],
+        ],
+      )
+      .count(2)
+      .name("handle_cup".into()),
+    );
   }
 
   fn init(&mut self, error: f32) {
@@ -1110,8 +1277,9 @@ impl ClickboxParams {
     let a5 = max_a;
 
     println!(
-      "total angle={}, length of 5th speed = {}",
+      "total angle={}, cable_len={}, length of 5th speed = {}",
       max_a.to_degrees(),
+      max_a * (drum.cable_surface_r + 0.5),
       (a3 - a2 - self.angle_between).to_degrees()
     );
 
@@ -1200,7 +1368,7 @@ impl DrumCreator {
     1
   }
 
-  pub fn aabb(&self,  part_index: usize) -> AABB {
+  pub fn aabb(&self, part_index: usize) -> AABB {
     AABB::around_zero(self.max_r)
   }
 
@@ -1347,7 +1515,8 @@ impl DrumCreator {
 }
 
 pub struct ClickboxCreator {
-  builder: Builder,
+  builder15: Builder,
+  builder2: Builder,
   drum: DrumCreator,
 }
 
@@ -1358,56 +1527,84 @@ impl ClickboxCreator {
     let mut params = ClickboxParams::default();
     params.init(error);
 
-    let mut builder = Builder::new(1.0, 2.0, error);
+    let mut builder2 = Builder::new(1.0, 2.0, error);
+    let mut builder15 = Builder::new(2.0, 1.5, error);
     let mut drum = DrumCreator::default();
 
-    params.make_clickbox(&mut builder);
+    params.make_clickbox(&mut builder2);
+    params.make_handle(&mut builder15);
     params.make_drum(&mut drum);
 
-    Self { builder, drum }
+    Self { builder15, builder2, drum }
   }
 
   pub fn faces(&self) -> usize {
-    self.builder.contour_count() + self.drum.faces()
+    self.builder2.contour_count() + self.builder15.contour_count() + self.drum.faces()
+  }
+
+  fn match_index<R>(
+    &self,
+    part_index: usize,
+    builder15_action: impl Fn(usize) -> R,
+    builder2_action: impl Fn(usize) -> R,
+    drum_action: impl Fn(usize) -> R,
+  ) -> R {
+    if part_index < self.builder15.contour_count() {
+      return builder15_action(part_index);
+    }
+    let part_index = part_index - self.builder15.contour_count();
+    if part_index < self.builder2.contour_count() {
+      return builder2_action(part_index);
+    }
+    let part_index = part_index - self.builder2.contour_count();
+    if part_index < self.drum.faces() {
+      return drum_action(part_index);
+    }
+    panic!("Wrong index!");
   }
 
   pub fn get_height(&self, part_index: usize) -> f32 {
-    if part_index < self.builder.contour_count() {
-      self.builder.get_material_thickness(part_index)
-    } else {
-      self.drum.get_height(part_index - self.builder.contour_count())
-    }
+    self.match_index(
+      part_index,
+      |i| self.builder15.get_material_thickness(i),
+      |i| self.builder2.get_material_thickness(i),
+      |i| self.drum.get_height(i),
+    )
   }
 
   pub fn get_name(&self, part_index: usize) -> Option<&str> {
-    if part_index < self.builder.contour_count() {
-      self.builder.get_name(part_index)
-    } else {
-      self.drum.get_name(part_index - self.builder.contour_count())
-    }
+    self.match_index(
+      part_index,
+      |i| self.builder15.get_name(i),
+      |i| self.builder2.get_name(i),
+      |i| self.drum.get_name(i),
+    )
   }
 
   pub fn get_count(&self, part_index: usize) -> usize {
-    if part_index < self.builder.contour_count() {
-      self.builder.get_count(part_index)
-    } else {
-      self.drum.get_count(part_index - self.builder.contour_count())
-    }
+    self.match_index(
+      part_index,
+      |i| self.builder15.get_count(i),
+      |i| self.builder2.get_count(i),
+      |i| self.drum.get_count(i),
+    )
   }
 
   pub fn get_sticker_index(&self, pos: Point, part_index: usize) -> PartIndex {
-    if part_index < self.builder.contour_count() {
-      self.builder.contains(part_index, pos) as PartIndex
-    } else {
-      self.drum.get_sticker_index(pos, part_index - self.builder.contour_count())
-    }
+    self.match_index(
+      part_index,
+      |i| self.builder15.contains(pos, i) as PartIndex,
+      |i| self.builder2.contains(pos, i) as PartIndex,
+      |i| self.drum.get_sticker_index(pos, i),
+    )
   }
 
   pub fn aabb(&self, part_index: usize) -> Option<AABB> {
-    if part_index < self.builder.contour_count() {
-      Some(self.builder.aabb(part_index))
-    } else {
-      Some(self.drum.aabb(part_index))
-    }
+    Some(self.match_index(
+      part_index,
+      |i| self.builder15.aabb(i),
+      |i| self.builder2.aabb(i),
+      |i| self.drum.aabb(i),
+    ))
   }
 }

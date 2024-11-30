@@ -20,7 +20,7 @@ fn main() {
     let mut cc = ContourCreator::new(aabb, 0.2, 20);
 
     let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
-    print!("generate {name}...");
+    print!("generate {name} in aabb {:?}...", aabb);
     std::io::stdout().flush().unwrap();
 
     let contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));

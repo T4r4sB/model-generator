@@ -198,18 +198,6 @@ impl Builder {
     if !connector.has_couple_size_bottom {
       connector.couple_size_bottom = self.default_material_thickness;
     }
-
-    connector.length -= self.error * 2.0;
-    for p in &mut connector.protrusions {
-      p.1 -= 2.0 * self.error;
-    }
-    for e in &mut connector.extra_layers_bottom {
-      e.2 -= 2.0 * self.error;
-    }
-    for e in &mut connector.extra_layers_top {
-      e.2 -= 2.0 * self.error;
-    }
-
     self.connectors.push(connector);
     result
   }
@@ -230,7 +218,7 @@ impl Builder {
     connector_id.0 == index + self.figures.len()
   }
 
-  pub fn contains(&self, index: usize, pos: Point) -> bool {
+  pub fn contains(&self, pos: Point, index: usize) -> bool {
     if index < self.figures.len() {
       self.get_figure(FigureID(index)).contains(pos, self)
     } else {
@@ -242,7 +230,7 @@ impl Builder {
     if index < self.figures.len() {
       self.get_figure(FigureID(index)).aabb.rounded(0.501)
     } else {
-      self.get_connector(ConnectorID(index - self.figures.len())).aabb().rounded(0.001)
+      self.get_connector(ConnectorID(index - self.figures.len())).aabb(self).rounded(0.001)
     }
   }
 
@@ -957,7 +945,7 @@ impl Connector {
     self
   }
 
-  pub fn aabb(&self) -> AABB {
+  pub fn aabb(&self, builder: &Builder) -> AABB {
     let x1 = 0.0;
     let x2 = self.length;
 
@@ -976,11 +964,21 @@ impl Connector {
       y1 = f32::max(y1, bottom_w - w);
     }
 
-    AABB { x1, y1, x2, y2 }
+    let mut result = AABB { x1, y1, x2, y2 };
+    for &h in &self.holes {
+      let h = builder.get_hole(h);
+      result = result.combine(h.aabb());
+    }
+    for &s in &self.slots {
+      let s = builder.get_slot(s);
+      result = result.combine(s.aabb());
+    }
+
+    result
   }
 
   pub fn contains(&self, pt: Point, builder: &Builder) -> bool {
-    let corrected_pt = Point { x: pt.x + self.error_shift, y: pt.y };
+    let corrected_pt = Point { x: pt.x, y: pt.y };
     for &h in &self.holes {
       let h = builder.get_hole(h);
       if h.hole(corrected_pt) {
@@ -1007,7 +1005,7 @@ impl Connector {
       }
     }
 
-    if pt.x < 0.0 || pt.x >= self.length {
+    if pt.x < self.error_shift || pt.x >= self.length - self.error_shift {
       return false;
     }
 
@@ -1015,20 +1013,20 @@ impl Connector {
     let mut bottom_w = -self.width * 0.5;
 
     for &(x1, x2) in &self.protrusions {
-      if pt.x > x1 && pt.x < x2 {
+      if pt.x > x1 + self.error_shift && pt.x < x2 - self.error_shift {
         top_w += self.couple_size_top;
         bottom_w -= self.couple_size_bottom;
       }
     }
 
     for &(w, x1, x2) in &self.extra_layers_top {
-      if pt.x > x1 && pt.x < x2 {
+      if pt.x > x1 + self.error_shift && pt.x < x2 - self.error_shift {
         top_w += w;
       }
     }
 
     for &(w, x1, x2) in &self.extra_layers_bottom {
-      if pt.x > x1 && pt.x < x2 {
+      if pt.x > x1 + self.error_shift && pt.x < x2 - self.error_shift {
         bottom_w -= w;
       }
     }

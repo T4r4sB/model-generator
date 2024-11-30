@@ -881,8 +881,16 @@ impl ContourCreator {
     }
 
     self.fill_cell(&mut cells[0], 0, 0, part_f);
+    if cells[0].index != 0 {
+      panic!("Fail aabb in position {:?}", cells[0].pos);
+    }
+
     for x in 1..szx {
       self.fill_cell(&mut cells[x], x, 0, part_f);
+
+      if cells[x].index != 0 {
+        panic!("Fail aabb in position {:?}", cells[x].pos);
+      }
 
       fill_mids!(x - 1, v_pz, x, v_mz);
     }
@@ -895,6 +903,10 @@ impl ContourCreator {
       self.fill_cell(&mut cells[c11], 0, y, part_f);
       fill_mids!(c10, v_zp, c11, v_zm);
 
+      if cells[c11].index != 0 {
+        panic!("Fail aabb in position {:?}", cells[c11].pos);
+      }
+
       for x in 1..szx {
         let c = c + x;
         let c00 = c - 1 - szx;
@@ -902,6 +914,12 @@ impl ContourCreator {
         let c01 = c - 1;
         let c11 = c;
         self.fill_cell(&mut cells[c11], x, y, part_f);
+
+        if x == szx - 1 || y == szy-1 {
+          if cells[c11].index != 0 {
+            panic!("Fail aabb in position {:?}", cells[c11].pos);
+          }
+        }
 
         fill_mids!(c01, v_pz, c11, v_mz);
         fill_mids!(c10, v_zp, c11, v_zm);
