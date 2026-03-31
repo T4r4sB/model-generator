@@ -88,7 +88,7 @@ impl Model {
   }
 
   pub fn smooth(&mut self, delta: f32) {
-    let mut positions = vec![(Point::zero(), 0); self.vertices.len()];
+    let mut positions = vec![(Point::ZERO, 0); self.vertices.len()];
     for t in &self.triangles {
       let t0 = t.0 as usize;
       let t1 = t.1 as usize;
@@ -243,10 +243,10 @@ impl Model {
     let mut group_of_t = Vec::<u32>::new();
     group_of_t.resize(self.triangles.len(), 0);
     let mut normals = Vec::new();
-    normals.resize(self.triangles.len(), Point::zero());
+    normals.resize(self.triangles.len(), Point::ZERO);
     let mut group_counts = Vec::<u32>::new();
 
-    normals.push(Point::zero());
+    normals.push(Point::ZERO);
 
     // Stage1: split all faces to groups
     for ti in 0..self.triangles.len() {
@@ -1016,7 +1016,7 @@ impl Model {
   }
 
   pub fn center(&self) -> Point {
-    let mut sum = Point::zero();
+    let mut sum = Point::ZERO;
     for v in &self.vertices {
       sum += *v;
     }
@@ -1139,6 +1139,18 @@ impl Model {
     new_t
   }
 
+  pub fn get_volume(&self) -> f32 {
+    let mut result = 0.0;
+    for t in &self.triangles {
+      let v0 = self.vertices[t.0 as usize];
+      let v1 = self.vertices[t.1 as usize];
+      let v2 = self.vertices[t.2 as usize];
+      result += dot(v0, cross(v1, v2));
+    }
+
+    result / 6.0
+  }
+
   pub fn convex_triangles(vertices: &[Point], eps: f32) -> Option<Vec<Triangle>> {
     let mut i1 = 1;
     let mut i2 = 2;
@@ -1215,6 +1227,12 @@ impl Model {
   pub fn convex(vertices: &[Point], eps: f32) -> Option<Self> {
     let triangles = Self::convex_triangles(vertices, eps)?;
     Some(Self { vertices: vertices.to_owned(), triangles, free_vertices: Vec::new() })
+  }
+
+  pub fn map_points(&mut self, f: impl Fn(Point) -> Point) {
+    for v in &mut self.vertices {
+      *v = f(*v);
+    }
   }
 
   pub fn save_to_stl(&self, path: &std::path::Path) -> Result<(), String> {

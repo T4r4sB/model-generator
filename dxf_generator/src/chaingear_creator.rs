@@ -1,8 +1,8 @@
-use crate::points2d::*;
-use crate::solid::*;
+use common::points2d::*;
+use common::solid::*;
 use num::Float;
 
-use crate::slots_and_holes::*;
+use common::slots_and_holes::*;
 
 pub struct GearContour {
   tc: usize,
@@ -104,12 +104,7 @@ impl ChaingearCreator {
     let gears = vec![
       GearContour::new(18, "18-rear"),
       GearContour::new(19, "19-rear"),
-      GearContour::new(22, "22-rear"),
-      GearContour::new(39, "39-front"),
-      GearContour::new(41, "41-front"),
-      GearContour::new(35, "35-rear"),
-      GearContour::new(37, "37-rear"),
-      GearContour::new(30, "30-rear"),
+      GearContour::new(27, "27-rear"),
     ];
 
     Self { gears }
@@ -140,15 +135,20 @@ impl ChaingearCreator {
 
           */
 
-  pub fn get_count(&self, current_normal: usize) -> usize {
+  pub fn get_count(&self, part_index: usize) -> usize {
     1
+  }
+
+  pub fn aabb(&self, part_index: usize) -> Option<AABB> {
+    let gear = &self.gears[part_index];
+    Some(AABB::around_zero(gear.pin_c_r + gear.pin_r))
   }
 
   pub fn faces(&self) -> usize {
     self.gears.len()
   }
 
-  pub fn get_height(&self, current_normal: usize) -> f32 {
+  pub fn get_height(&self, part_index: usize) -> f32 {
     3.0
   }
 
@@ -160,16 +160,20 @@ impl ChaingearCreator {
     100.0
   }
 
-  pub fn get_name(&self, current_normal: usize) -> Option<&str> {
-    Some(self.gears[current_normal].name)
+  pub fn get_name(&self, part_index: usize) -> Option<&str> {
+    Some(self.gears[part_index].name)
   }
 
-  pub fn get_sticker_index(&self, pos: Point, current_normal: usize) -> PartIndex {
+  pub fn get_sticker_index(&self, pos: Point, part_index: usize) -> PartIndex {
     let r = pos.len();
-    if current_normal < self.gears.len() {
-      let g = &self.gears[current_normal];
+    if part_index < self.gears.len() {
+      let g = &self.gears[part_index];
 
-      if current_normal < 3 || current_normal > 4 {
+      if GearContour::in_driver_hole(pos) {
+        return 0;
+      }
+
+      if part_index < 2 {
         for i in 0..15 {
           let a = i as f32 / 15.0 * 2.0 * PI;
           let a = Point::from_angle(a).scale(g.inner_r() * 0.5 + 11.0);
@@ -178,78 +182,35 @@ impl ChaingearCreator {
             return 0;
           }
         }
-
-        if  current_normal < 3 {
-          if GearContour::in_driver_hole(pos) { return 0; }
-        } else {
-          if GearContour::in_driver_hole_6(pos) { return 0; }
-        }
-
-        return g.contains(pos) as PartIndex;
       } else {
-        let bcd;
-        let cnt;
+        for i in 0 .. 3 {
+          let angle = f32::atan2(pos.y, pos.x) - i as f32 * 2.0 * PI / 3.0;
+          let angle = angle.rem_euclid(2.0 * PI);
+          let r = pos.len();
+          let ak = 30.0;
+          let a = angle * ak;
 
-        if current_normal == 3 {
-          bcd = 104.0;
-          cnt = 4;
-        } else {
-          bcd = 104.0;
-          cnt = 5;
-        }
-
-        if r < g.inner_r() - 2.0 {
-          let mut v = [f32::INFINITY; 11];
-          v[0] = (g.inner_r() - 2.0) - r;
-
-          if r < 104.0 * 0.5 - 5.0 - 2.0 {
+          let pp = Point { x: r, y: a };
+          let pp1 = Point { x: 28.5, y: 0.6 * ak };
+          let pp2 = Point { x: 28.5, y: 1.4 * ak };
+          let pp3 = Point { x: 40.5, y: 2.6 * ak };
+          let pp4 = Point { x: 40.5, y: 3.4 * ak };
+          if dist_pl(pp, pp1, pp2) < sqr(1.0)
+            || dist_pl(pp, pp2, pp3) < sqr(1.0)
+            || dist_pl(pp, pp3, pp4) < sqr(1.0)
+          {
             return 0;
           }
-
-          for i in 0..cnt {
-            let a = i as f32 / 4.0 * 2.0 * PI;
-            let a1 = Point::from_angle(a).scale(104.0 * 0.5);
-            let l1 = (pos - a1).len();
-            if l1 < 5.0 {
-              return 0;
-            }
-
-            let m2 = 10.0 - l1;
-
-            if l1 < 10.0 {
-              return 1;
-            }
-
-            v[i * 2 + 1] = l1 - 10.0;
-
-            let a2 = Point::from_angle(a).scale(104.0 * 0.5 + 40.0);
-            let l2 = (pos - a2).len();
-            if (l2 - 40.0).abs() < 5.0 {
-              return 1;
-            }
-
-            v[i * 2 + 2] = (l2 - 40.0).abs() - 5.0;
-          }
-
-          v.sort_by(|a, b| a.partial_cmp(b).unwrap());
-          let rr = 2.0;
-          if v[0] < rr && v[1] < rr {
-            if sqr(rr - v[0]) + sqr(rr - v[1]) > sqr(rr) {
-              return 1;
-            }
-          }
-
-          return 0;
-        } else {
-          return g.contains(pos) as PartIndex;
         }
       }
+
+      return g.contains(pos) as PartIndex;
     }
 
     0
   }
 
-  pub fn get_part_index(&self, pos: crate::points3d::Point) -> PartIndex {
+  pub fn get_part_index(&self, pos: common::points3d::Point) -> PartIndex {
     0
   }
 }

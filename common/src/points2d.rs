@@ -95,6 +95,16 @@ pub fn complex_mul(a: Point, b: Point) -> Point {
   Point { x: a.x * b.x - a.y * b.y, y: a.x * b.y + a.y * b.x }
 }
 
+pub fn find_pp2(p1: Point, dist1: f32, p2: Point, dist2: f32, direction: bool) -> Point {
+  let delta = p2 - p1;
+  let add = delta.len();
+  let delta = delta.scale(1.0 / add);
+  let sub = (dist2 * dist2 - dist1 * dist1) / add;
+  let x = (add - sub) * 0.5;
+  let h = (dist1 * dist1 - x * x).sqrt();
+  p1 + delta.scale(x) + delta.perp().scale(if direction { h } else { -h })
+}
+
 pub fn find_root(
   f: &dyn Fn(Point) -> u32,
   mut pos1: Point,
@@ -135,6 +145,10 @@ pub fn dist_pl(p: Point, p1: Point, p2: Point) -> f32 {
   } else {
     cross(p1, p12).abs()
   }
+}
+
+pub fn angle_between(p: Point, p1: Point, p2: Point) -> bool {
+  (cross(p, p1) > 0.0) as i32 + (cross(p1, p2) > 0.0) as i32 + (cross(p2, p) > 0.0) as i32 >= 2
 }
 
 #[derive(Copy, Clone, Debug)]

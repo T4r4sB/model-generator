@@ -27,17 +27,18 @@ use common::contour::*;
 use common::matrix::*;
 use common::model::*;
 use common::points2d;
+use common::points2d::AABB;
 use common::points3d::*;
 use common::solid::*;
 
-mod semiosnik_family_creator;
-type PartCreator = semiosnik_family_creator::SemiosnikCreator;
+//mod railroad_creator;
+//type PartCreator = railroad_creator::RailroadCreator;
 
-//mod axle_tool_creator;
-//type PartCreator = axle_tool_creator::AxleToolCreator;
+//mod swamp_tod2_creator;
+//type PartCreator = swamp_tod2_creator::SwampTodCreator;
 
-//mod semiosnik_family_creator;
-//type PartCreator = semiosnik_family_creator::SemiosnikCreator;
+mod sphere_creator;
+type PartCreator = sphere_creator::SphereCreator;
 
 pub mod gl {
   #![allow(clippy::all)]
@@ -308,7 +309,9 @@ impl Renderer {
         &mut length,
         buf.as_mut_ptr() as *mut _,
       );
+      let mut success = true;
       let log = String::from_utf8_lossy(&buf[..length as usize]);
+      success &= log.is_empty();
       println!("vertex shader log = {}", log);
 
       let fragment_shader = create_shader(&gl, gl::FRAGMENT_SHADER, FRAGMENT_SHADER_SOURCE);
@@ -320,6 +323,7 @@ impl Renderer {
         buf.as_mut_ptr() as *mut _,
       );
       let log = String::from_utf8_lossy(&buf[..length as usize]);
+      success &= log.is_empty();
       println!("fragment shader log = {}", log);
 
       let program = gl.CreateProgram();
@@ -329,7 +333,12 @@ impl Renderer {
 
       gl.GetProgramInfoLog(program, max_length as i32, &mut length, buf.as_mut_ptr() as *mut _);
       let log = String::from_utf8_lossy(&buf[..length as usize]);
+      success &= log.is_empty();
       println!("program log = {}", log);
+
+      if !success {
+        panic!("shader error");
+      }
 
       gl.UseProgram(program);
 
@@ -349,13 +358,13 @@ impl Renderer {
       let part_func = &|p| part_creator.get_part_index(p);
 
       let start = std::time::Instant::now();
-      let mut cc = ContourCreator::new(points2d::AABB::around_zero(100.0), 0.3, 20);
+      let mut cc = ContourCreator::new(points2d::AABB::around_zero(100.0), 0.15, 20);
 
       let mut total_length = 0.0;
       let mut total_square = 0.0;
 
       for i in 0..part_creator.faces() {
-        let contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
+        let mut contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
         let h = part_creator.get_height(i);
         let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
 
@@ -363,7 +372,18 @@ impl Renderer {
         let count = part_creator.get_count(i);
         let name = format!("(THICK={thickness}, AMOUNT={count}) {name}");
 
-        let single_i = contours.len() == 1;
+        let mut single_i = contours.len() == 1;
+
+        if !single_i {
+          // if need single file
+          let mut common = ContourSet::new();
+          for (_, cc) in std::mem::take(&mut contours) {
+            common.append(cc)
+          }
+          contours.insert(1, common);
+          single_i = true;
+        }
+
         for (index, mut cc) in contours {
           cc.optimize(0.01);
           cc.remove_trash();
@@ -386,6 +406,7 @@ impl Renderer {
             println!("{}", msg);
           }
 
+          /*
           let ex = cc.extrude(h);
 
           let single_j = ex.len() == 1;
@@ -398,6 +419,18 @@ impl Renderer {
               println!("{}", msg);
             }
           }
+
+          let mut appended = Model::new();
+          for ex in ex {
+            appended.append(ex);
+          }
+
+          let name = format!("{name}_appended");
+          if let Err(msg) =
+            appended.save_to_stl(&std::path::Path::new("extruded").join(format!("{name}.stl")))
+          {
+            println!("{}", msg);
+          }*/
         }
       }
 
@@ -407,9 +440,11 @@ impl Renderer {
 
       let mut mc = ModelCreator::new(quality, PartCreator::get_size(), 20, 0, part_func);
       let width = 0.05;
+      println!();
       while !mc.finished() {
         mc.fill_next_layer(part_func);
       }
+      println!();
 
       let end_layers = std::time::Instant::now();
 
@@ -420,6 +455,10 @@ impl Renderer {
       let mut sum_v_after = 0;
 
       let mut models = mc.get_models();
+
+      let mut sum_volumes = 0.0;
+
+      let mut weights = Vec::new();
 
       for (&m_index, m) in &mut models {
         sum_v += m.vertices.len();
@@ -437,13 +476,20 @@ impl Renderer {
         }
         m.delete_unused_v();
 
+        let volume = m.get_volume();
+        sum_volumes += volume;
+
         sum_v_after += m.vertices.len();
         max_v_after = std::cmp::max(max_v_after, m.vertices.len());
 
+        weights.push((m_index, volume * 7.850 * 0.001));
+
         println!(
-          "save {m_index} to stl... {} vertices {} triangles",
+          "save {m_index} to stl... {} vertices {} triangles {} volume {} mass",
           m.vertices.len(),
-          m.triangles.len()
+          m.triangles.len(),
+          volume,
+          volume * 7.850 * 0.001
         );
         if let Err(msg) =
           m.save_to_stl(&std::path::Path::new("output").join(format!("output_{}.stl", m_index)))
@@ -455,15 +501,32 @@ impl Renderer {
       let end_opt = std::time::Instant::now();
 
       println!(
-        "models created, sum_v={}, max_v={}, after: sum_v={}, max_v={}",
-        sum_v, max_v, sum_v_after, max_v_after
+        "models created, sum_v={}, max_v={}, after: sum_v={}, max_v={}, total volume = {}, total mass = {}",
+        sum_v, max_v, sum_v_after, max_v_after, sum_volumes, sum_volumes * 7.850 * 0.001
       );
 
       println!("layers time: {:?}, opt time: {:?}", end_layers - start, end_opt - end_layers);
 
+      weights.sort_by(|(_, w1), (_, w2)| w1.partial_cmp(w2).unwrap());
+      for (i, w) in weights {
+        println!("{i}\t{w}");
+      }
+
       let mut array_buffer = ArrayBuffer::default();
-      for (m_index, m) in &models {
-        m.write_to_buffer(&mut array_buffer, (m_index + 1).wrapping_mul(0x274381) as u32);
+      for (&m_index, m) in &mut models {
+        /*
+        if (m_index % 1000) & 4 != 0 {
+          m.map_points(|p| p.rotate(Point::Y, PI * 0.5))
+        }
+        for var in [2, 4 + 16 ,  2 + 8, 2 + 16, 2 + 32] {
+          if var == m_index % 1000 {
+            m.map_points(|p| p.rotate(Point::Z, PI * 0.25));
+            break;
+          }
+        }*/
+
+        let color = (m_index + 1).wrapping_mul(0x274381) as u32 | 0x404040;
+        m.write_to_buffer(&mut array_buffer, color);
       }
 
       println!("models written to big buffer");
@@ -721,8 +784,8 @@ varying vec3 v_initial_pos;
 void main() {
     vec3 normal = normalize(cross(dFdy(v_pos), dFdx(v_pos)));
 
-    float factor = max(0.0, min(1.0, (160.0 - v_pos.z) * 0.01));
-    vec3 white = vec3(1.0, 1.0, 1.0);
+    float factor = max(0.0, min(1.0, (250.0 - v_pos.z) * 0.01));
+    vec3 white = vec3(0.8, 0.8, 0.8);
     vec3 color = v_color;
     int odd_x = fract(v_initial_pos.x * 0.5) < 0.5 ? 1 : 0;
     int odd_y = fract(v_initial_pos.y * 0.5) < 0.5 ? 1 : 0;
@@ -734,7 +797,6 @@ void main() {
         color.y = fract(color.y + 0.5);
         color.z = fract(color.z + 0.5);
     }*/
-
     color = color * (-normal.z);
     color = white + (color - white) * factor;
     gl_FragColor = vec4(color, 1.0);

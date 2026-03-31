@@ -1,7 +1,7 @@
-use crate::common_for_twisty_puzzles::*;
-use crate::model::*;
-use crate::points3d::*;
-use crate::solid::*;
+use common::common_for_twisty_puzzles::*;
+use common::model::*;
+use common::points3d::*;
+use common::solid::*;
 
 use std::cell::RefCell;
 
@@ -52,6 +52,7 @@ impl DecaminxCreator {
     ];
 
     let min_angle = ((2.0 * 2.0f32.sqrt() + 1.0) / 7.0).sqrt().acos();
+
     let max_angle = (-e_cos).acos() * 0.5;
     let r: f32 = 7.0 / (max_angle - min_angle);
 
@@ -105,7 +106,7 @@ impl DecaminxCreator {
   }
 
   pub fn get_quality() -> usize {
-    512
+    128
   }
 
   pub fn get_size() -> f32 {
@@ -124,7 +125,7 @@ impl DecaminxCreator {
     let r = pos.len();
     let ball_r = self.groove[1] - 10.0;
     if r < ball_r {
-      return 0;
+      // return 0; // tmp
       for i in 0..self.axis.len() {
         let a = self.axis[i];
         if dot(pos, self.axis[i]) > 0.0 {
@@ -169,7 +170,7 @@ impl DecaminxCreator {
         return 0;
       }
       nd[i] = center_dist - d;
-      if d > center_dist - 0.6 {
+      if d > center_dist - 0.9 {
         cup = true;
       }
     }
@@ -235,9 +236,9 @@ impl DecaminxCreator {
       return 0;
     }
 
-     if index != 1 && index != 4 {
-       return 0;
-      }
+    if index != 1 && index != 4 {
+      //   return 0; // tmp
+    }
 
     if index.count_ones() == 1 {
       let aindex = index.ilog2() as usize;

@@ -6,9 +6,10 @@ pub struct Point {
 }
 
 impl Point {
-  pub fn zero() -> Self {
-    Self { x: 0.0, y: 0.0, z: 0.0 }
-  }
+  pub const ZERO: Point = Self { x: 0.0, y: 0.0, z: 0.0 };
+  pub const X: Point = Self { x: 1.0, y: 0.0, z: 0.0 };
+  pub const Y: Point = Self { x: 0.0, y: 1.0, z: 0.0 };
+  pub const Z: Point = Self { x: 0.0, y: 0.0, z: 1.0 };
 
   pub fn sqr_len(self) -> f32 {
     self.x * self.x + self.y * self.y + self.z * self.z

@@ -70,7 +70,7 @@ impl SolidCell {
   pub fn new() -> Self {
     Self {
       index: 0,
-      pos: Point::zero(),
+      pos: Point::ZERO,
       v_pzz: BAD_INDEX,
       v_mzz: BAD_INDEX,
       v_zpz: BAD_INDEX,
@@ -813,6 +813,6 @@ impl ModelCreator {
     self.next_layer = self.prev_layer.lift(z, part_f);
     self.use_layers(part_f);
 
-    println!("processed [{}/{}] layers", self.last_z, self.size);
+    print!("\rprocessed [{}/{}] layers", self.last_z, self.size);
   }
 }

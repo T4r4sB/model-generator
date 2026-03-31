@@ -1,7 +1,7 @@
-use crate::common_for_twisty_puzzles::*;
-use crate::model::*;
-use crate::points3d::*;
-use crate::solid::*;
+use common::common_for_twisty_puzzles::*;
+use common::model::*;
+use common::points3d::*;
+use common::solid::*;
 
 use num::Float;
 

@@ -140,6 +140,23 @@ pub fn find_square(n1: Point, n2: Point) -> Point {
   mid + cross(mid, dn).scale(mid.len().recip())
 }
 
+pub struct FactorsForTriangle(pub f32, pub f32, pub f32);
+
+pub fn find_factors_for_triangle(d: f32, d1: f32, d2: f32) -> FactorsForTriangle {
+  // result is (a,b,c); for points x,y third is a*x + b*y + cross*c
+  // a*a+b*b+2*a*b*d+c*c*(1 - d*d) = 1
+  // a + b*d = d1
+  // a*d + b = d2
+  // matrix is
+  // |  1  d  d1 |
+  // | d   1  d2 |
+  let det = 1.0 / (1.0 - d * d);
+  let a = (d1 - d * d2) * det;
+  let b = (d2 - d * d1) * det;
+  let c = ((1.0 - a * a - b * b - 2.0 * a * b * d) * det).sqrt();
+  FactorsForTriangle(a, b, c)
+}
+
 pub struct Basis(pub Point, pub Point, pub Point);
 
 pub fn to_basis(a: Point) -> Basis {

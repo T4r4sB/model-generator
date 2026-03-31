@@ -141,17 +141,7 @@ impl Builder {
     if !hole.has_oval_width {
       hole.oval_width = hole.border;
     }
-    if hole.r > 0.0 {
-      hole.r += self.error;
-    } else if hole.r < 0.0 {
-      hole.r -= self.error;
-    }
-    if hole.border > 0.0 {
-      hole.border -= self.error * 1.0;
-    }
-    if hole.oval_width > 0.0 {
-      hole.oval_width -= self.error * 1.0;
-    }
+    hole.error = self.error;
     self.holes.push(hole);
     result
   }
@@ -207,7 +197,11 @@ impl Builder {
   }
 
   pub fn get_material_thickness(&self, index: usize) -> f32 {
-    self.default_material_thickness
+    if index < self.figures.len() {
+      self.get_figure(FigureID(index)).thickness
+    } else {
+      self.get_connector(ConnectorID(index - self.figures.len())).thickness
+    }
   }
 
   pub fn sticker_is_figure_id(&self, index: usize, figure_id: FigureID) -> bool {
@@ -349,7 +343,7 @@ impl Slot {
 
   fn dist(&self, pt: Point) -> f32 {
     if self.border == 0.0 {
-      return 2.0;
+      return f32::INFINITY;
     }
     let f1 = self.normal_proj(pt);
     let w = self.width * 0.5 - self.error;
@@ -444,6 +438,7 @@ impl LinearFunc {
   }
 }
 
+// Uses pre-calculated error
 #[derive(Debug)]
 struct ControlLine {
   start: LinearFunc,
@@ -505,6 +500,7 @@ pub struct SlotArc {
   center: Point,
   geom_center: Point,
   control_lines: Vec<ControlLine>,
+  error: f32,
 }
 
 impl SlotArc {
@@ -517,6 +513,7 @@ impl SlotArc {
     angle2: f32,
   ) -> Self {
     let slot = builder.get_slot(slot_id);
+    let error = slot.error;
     let border = 0.0;
     let round = 0.0;
 
@@ -560,60 +557,64 @@ impl SlotArc {
 
     let geom_center = complex_mul(get_p(length * 0.5, 0.0) - center, angle_mid) + center;
 
-    if d_perp < -width * 0.5 {
-      if d_dir < 0.0 {
-        let pt1 = get_c(0.0, -width * 0.5, -slot_dist);
-        let pt2 = get_c(length, width * 0.5, slot_dist);
+    let w = width * 0.5 + error;
+    let h1 = error;
+    let h2 = length - error;
+
+    if d_perp < -w {
+      if d_dir < h1 {
+        let pt1 = get_c(h1, -w, -slot_dist);
+        let pt2 = get_c(h2, w, slot_dist);
         control_lines.push(ControlLine::new(&params, pt1, pt2));
-      } else if d_dir < length {
-        let ptm = get_c(d_dir, -width * 0.5, -slot_dist);
-        let pt1 = get_c(0.0, width * 0.5, slot_dist);
-        let pt2 = get_c(length, width * 0.5, slot_dist);
+      } else if d_dir < h2 {
+        let ptm = get_c(d_dir, -w, -slot_dist);
+        let pt1 = get_c(h1, w, slot_dist);
+        let pt2 = get_c(h2, w, slot_dist);
         control_lines.push(ControlLine::new(&params, ptm, pt1));
         control_lines.push(ControlLine::new(&params, ptm, pt2));
       } else {
-        let pt1 = get_c(length, -width * 0.5, -slot_dist);
-        let pt2 = get_c(0.0, width * 0.5, slot_dist);
+        let pt1 = get_c(h2, -w, -slot_dist);
+        let pt2 = get_c(0.0, w, slot_dist);
         control_lines.push(ControlLine::new(&params, pt1, pt2));
       }
-    } else if d_perp < width * 0.5 {
-      if d_dir < 0.0 {
-        let ptm = get_c(0.0, d_perp, -slot_dist);
-        let pt1 = get_c(length, -width * 0.5, slot_dist);
-        let pt2 = get_c(length, width * 0.5, slot_dist);
+    } else if d_perp < w {
+      if d_dir < h1 {
+        let ptm = get_c(h1, d_perp, -slot_dist);
+        let pt1 = get_c(h2, -w, slot_dist);
+        let pt2 = get_c(h2, w, slot_dist);
         control_lines.push(ControlLine::new(&params, ptm, pt1));
         control_lines.push(ControlLine::new(&params, ptm, pt2));
-      } else if d_dir < length {
+      } else if d_dir < h2 {
         let ptm = get_c(d_dir, d_perp, 0.0);
-        let pt1 = get_c(0.0, -width * 0.5, slot_dist);
-        let pt2 = get_c(0.0, width * 0.5, slot_dist);
-        let pt3 = get_c(length, -width * 0.5, slot_dist);
-        let pt4 = get_c(length, width * 0.5, slot_dist);
+        let pt1 = get_c(h1, -w, slot_dist);
+        let pt2 = get_c(h1, w, slot_dist);
+        let pt3 = get_c(h2, -w, slot_dist);
+        let pt4 = get_c(h2, w, slot_dist);
         control_lines.push(ControlLine::new(&params, ptm, pt1));
         control_lines.push(ControlLine::new(&params, ptm, pt2));
         control_lines.push(ControlLine::new(&params, ptm, pt3));
         control_lines.push(ControlLine::new(&params, ptm, pt4));
       } else {
-        let ptm = get_c(length, d_perp, -slot_dist);
-        let pt1 = get_c(0.0, -width * 0.5, slot_dist);
-        let pt2 = get_c(0.0, width * 0.5, slot_dist);
+        let ptm = get_c(h2, d_perp, -slot_dist);
+        let pt1 = get_c(h1, -w, slot_dist);
+        let pt2 = get_c(h1, w, slot_dist);
         control_lines.push(ControlLine::new(&params, ptm, pt1));
         control_lines.push(ControlLine::new(&params, ptm, pt2));
       }
     } else {
-      if d_dir < 0.0 {
-        let pt1 = get_c(0.0, width * 0.5, -slot_dist);
-        let pt2 = get_c(length, -width * 0.5, slot_dist);
+      if d_dir < h1 {
+        let pt1 = get_c(h1, w, -slot_dist);
+        let pt2 = get_c(h2, -w, slot_dist);
         control_lines.push(ControlLine::new(&params, pt1, pt2));
-      } else if d_dir < length {
-        let ptm = get_c(d_dir, width * 0.5, -slot_dist);
-        let pt1 = get_c(0.0, -width * 0.5, slot_dist);
-        let pt2 = get_c(length, -width * 0.5, slot_dist);
+      } else if d_dir < h2 {
+        let ptm = get_c(d_dir, w, -slot_dist);
+        let pt1 = get_c(h1, -w, slot_dist);
+        let pt2 = get_c(h2, -w, slot_dist);
         control_lines.push(ControlLine::new(&params, ptm, pt1));
         control_lines.push(ControlLine::new(&params, ptm, pt2));
       } else {
-        let pt1 = get_c(length, width * 0.5, -slot_dist);
-        let pt2 = get_c(0.0, -width * 0.5, slot_dist);
+        let pt1 = get_c(h2, w, -slot_dist);
+        let pt2 = get_c(h1, -w, slot_dist);
         control_lines.push(ControlLine::new(&params, pt1, pt2));
       }
     }
@@ -630,6 +631,7 @@ impl SlotArc {
       round: slot_dist,
       geom_center,
       control_lines,
+      error,
     }
   }
 
@@ -637,20 +639,25 @@ impl SlotArc {
     let hole = |start, dir| -> bool {
       let d_dir = dot(pt - start, dir);
       let d_perp = cross(pt - start, dir);
-      let d = if d_dir < 0.0 {
-        -d_dir
-      } else if d_dir < self.length {
+
+      let h1 = self.error;
+      let h2 = self.length - self.error;
+      let d = if d_dir < h1 {
+        -d_dir + h1
+      } else if d_dir < h2 {
         0.0
       } else {
-        d_dir - self.length
+        d_dir - h2
       };
 
-      let p = if d_perp < -self.width * 0.5 {
-        -d_perp - self.width * 0.5
-      } else if d_perp < self.width * 0.5 {
+      let w = self.width * 0.5 + self.error;
+
+      let p = if d_perp < -w {
+        -d_perp - w
+      } else if d_perp < w {
         0.0
       } else {
-        d_perp - self.width * 0.5
+        d_perp - w
       };
 
       sqr(d) + sqr(p) <= sqr(self.round)
@@ -688,19 +695,48 @@ pub struct Hole {
   oval_width: f32,
   has_border: bool,
   has_oval_width: bool,
+  ring: bool,
+  error: f32,
 }
 
 impl Hole {
   pub fn new(center: Point, r: f32) -> Self {
-    Self { center, r, border: 0.0, oval_width: 0.0, has_border: false, has_oval_width: false }
+    Self {
+      center,
+      r,
+      border: 0.0,
+      oval_width: 0.0,
+      has_border: false,
+      has_oval_width: false,
+      ring: false,
+      error: 0.0,
+    }
   }
 
   pub fn new_no_border(center: Point, r: f32) -> Self {
-    Self { center, r, border: 0.0, oval_width: 0.0, has_border: true, has_oval_width: false }
+    Self {
+      center,
+      r,
+      border: 0.0,
+      oval_width: 0.0,
+      has_border: true,
+      has_oval_width: false,
+      ring: false,
+      error: 0.0,
+    }
   }
 
   pub fn new_solid(center: Point, r: f32) -> Self {
-    Self { center, r: 0.0, border: r, oval_width: 0.0, has_border: true, has_oval_width: false }
+    Self {
+      center,
+      r: 0.0,
+      border: r,
+      oval_width: 0.0,
+      has_border: true,
+      has_oval_width: false,
+      ring: false,
+      error: 0.0,
+    }
   }
 
   pub fn rotate(mut self, center: Point, angle: f32) -> Self {
@@ -715,6 +751,11 @@ impl Hole {
     self
   }
 
+  pub fn ring(mut self) -> Self {
+    self.ring = true;
+    self
+  }
+
   pub fn oval_width(mut self, oval_width: f32) -> Self {
     self.oval_width = oval_width;
     self.has_oval_width = true;
@@ -722,18 +763,22 @@ impl Hole {
   }
 
   fn hole(&self, pt: Point) -> bool {
-    self.r > 0.0 && (pt - self.center).sqr_len() < sqr(self.r)
+    self.r > 0.0 && !self.ring && (pt - self.center).sqr_len() < sqr(self.r + self.error)
   }
 
   fn dist(&self, pt: Point) -> f32 {
     if self.border == 0.0 {
-      return 2.0;
+      return f32::INFINITY;
     }
-    (pt - self.center).len() - (self.border + self.r)
+    let l = (pt - self.center).len();
+    if self.ring && l < self.r + self.error {
+      return self.r + self.error - l;
+    }
+    l - (self.border + self.r - self.error)
   }
 
   fn aabb(&self) -> AABB {
-    AABB::around(self.center, self.border + self.r)
+    AABB::around(self.center, self.border + self.r - self.error)
   }
 
   fn figure_contour_part(&self) -> FigureContourPart {
@@ -751,6 +796,7 @@ pub struct HoleArc {
   border: f32,
   arc_r: f32,
   big_arc: i32,
+  error: f32,
 }
 
 impl HoleArc {
@@ -773,6 +819,7 @@ impl HoleArc {
     let angle2 = complex_mul(dc, angle2);
     let angle_mid = complex_mul(dc, angle_mid);
     let arc_r = dc.len();
+    let error = hole.error;
     Self {
       center,
       angle1,
@@ -782,6 +829,7 @@ impl HoleArc {
       border: hole.border,
       arc_r,
       big_arc,
+      error,
     }
   }
 
@@ -797,10 +845,10 @@ impl HoleArc {
 
   fn hole(&self, pt: Point) -> bool {
     let pt = pt - self.center;
-    if (pt - self.angle1).sqr_len() < sqr(self.hole_r) {
+    if (pt - self.angle1).sqr_len() < sqr(self.hole_r + self.error) {
       return true;
     }
-    if (pt - self.angle2).sqr_len() < sqr(self.hole_r) {
+    if (pt - self.angle2).sqr_len() < sqr(self.hole_r + self.error) {
       return true;
     }
     if !self.pt_inside_angle(pt) {
@@ -808,22 +856,23 @@ impl HoleArc {
     }
 
     let sl = pt.sqr_len();
-    sl > sqr(self.arc_r - self.hole_r) && sl < sqr(self.arc_r + self.hole_r)
+    sl > sqr(self.arc_r - self.hole_r - self.error)
+      && sl < sqr(self.arc_r + self.hole_r + self.error)
   }
 
   fn dist(&self, pt: Point) -> f32 {
     if self.border == 0.0 {
-      return 2.0;
+      return f32::INFINITY;
     }
     let pt = pt - self.center;
 
     if !self.pt_inside_angle(pt) {
       f32::min(
-        (pt - self.angle1).len() - (self.border + self.hole_r),
-        (pt - self.angle2).len() - (self.border + self.hole_r),
+        (pt - self.angle1).len() - (self.border + self.hole_r - self.error),
+        (pt - self.angle2).len() - (self.border + self.hole_r - self.error),
       )
     } else {
-      (pt.len() - self.arc_r).abs() - (self.border + self.hole_r)
+      (pt.len() - self.arc_r).abs() - (self.border + self.hole_r - self.error)
     }
   }
 
@@ -865,6 +914,7 @@ pub struct Connector {
   extra_layers_bottom: Vec<(f32, f32, f32)>,
 
   name: Option<String>,
+  thickness: f32,
   count: usize,
 }
 
@@ -876,6 +926,7 @@ impl Connector {
     let error_shift = builder.error;
     let name = None;
     let count = 1;
+    let thickness = builder.default_material_thickness;
 
     Self {
       width,
@@ -892,6 +943,7 @@ impl Connector {
       extra_layers_bottom: vec![],
       name,
       count,
+      thickness,
     }
   }
 
@@ -902,6 +954,11 @@ impl Connector {
 
   pub fn count(mut self, count: usize) -> Self {
     self.count = count;
+    self
+  }
+
+  pub fn thickness(mut self, thickness: f32) -> Self {
+    self.thickness = thickness;
     self
   }
 
@@ -1069,10 +1126,11 @@ struct Oval {
   dist1: LinearFunc,
   case2: LinearFunc,
   dist2: LinearFunc,
+  error: f32,
 }
 
 impl Oval {
-  fn new(first: FigureContourPart, second: FigureContourPart) -> Option<Self> {
+  fn new(first: FigureContourPart, second: FigureContourPart, error: f32) -> Option<Self> {
     let splitter = LinearFunc::new_00_norm(first.center, second.center);
 
     let delta = first.center - second.center;
@@ -1097,11 +1155,11 @@ impl Oval {
     let case2 = LinearFunc::new_01(f2, s2);
     let dist2 = LinearFunc::new_00_norm(s2, f2);
 
-    Some(Self { first, second, splitter, case1, dist1, case2, dist2 })
+    Some(Self { first, second, splitter, case1, dist1, case2, dist2, error })
   }
 
   fn dist(&self, pt: Point) -> f32 {
-    if self.splitter.get(pt) > 0.0 {
+    let result = if self.splitter.get(pt) > 0.0 {
       let case = self.case1.get(pt);
       if case < 0.0 {
         (pt - self.first.center).len() - self.first.r
@@ -1119,7 +1177,9 @@ impl Oval {
       } else {
         (pt - self.second.center).len() - self.second.r
       }
-    }
+    };
+
+    result + self.error
   }
 
   fn aabb(&self) -> AABB {
@@ -1268,6 +1328,7 @@ pub struct Figure {
   ovals: Vec<Oval>,
   name: Option<String>,
   aabb: AABB,
+  thickness: f32,
   count: usize,
 }
 
@@ -1344,12 +1405,13 @@ impl Figure {
       .filter_map(|&OvalKey(p1, p2)| {
         let p1 = Self::get_part(builder, p1);
         let p2 = Self::get_part(builder, p2);
-        Oval::new(p1, p2)
+        Oval::new(p1, p2, builder.error)
       })
       .collect();
 
     let name = None;
     let count = 1;
+    let width = builder.default_material_thickness;
 
     let mut aabb = AABB::empty();
     for f in &filleds {
@@ -1368,7 +1430,7 @@ impl Figure {
       aabb = aabb.combine(o.aabb());
     }
 
-    Self { holes, hole_arcs, slots, slot_arcs, filleds, ovals, name, aabb, count }
+    Self { holes, hole_arcs, slots, slot_arcs, filleds, ovals, name, aabb, count, thickness: width }
   }
 
   pub fn name(mut self, name: String) -> Self {
@@ -1378,6 +1440,11 @@ impl Figure {
 
   pub fn count(mut self, count: usize) -> Self {
     self.count = count;
+    self
+  }
+
+  pub fn thickness(mut self, thickness: f32) -> Self {
+    self.thickness = thickness;
     self
   }
 

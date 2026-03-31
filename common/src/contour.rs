@@ -72,11 +72,10 @@ impl Contour {
     result
   }
 
-  pub fn contains(&self, points: &[Point], pi: u32) -> bool {
+  pub fn contains(&self, points: &[Point], p: Point) -> bool {
     if self.points.is_empty() {
       return false;
     }
-    let p = points[pi as usize];
     let mut c_in = 0;
     let mut c_out = 0;
     let mut prev = self.get(points, self.points.len() - 1) - p;
@@ -90,6 +89,10 @@ impl Contour {
       prev = cur;
     }
     c_in < c_out
+  }
+
+  pub fn contains_inner(&self, points: &[Point], pi: u32) -> bool {
+    self.contains(points, points[pi as usize])
   }
 
   pub fn split_to_triangles_if_convex(self, points: &[Point]) -> Vec<ConnectedPart> {
@@ -305,7 +308,7 @@ impl ConnectedPart {
   pub fn remove_trash(&mut self, points: &[Point]) {
     self.contours.retain(|c| {
       let sq = c.get_square(points);
-      sq < -1.0 || sq > 10.0
+      sq < -1.0 || sq > 1.0
     })
   }
 
@@ -565,10 +568,37 @@ impl ConnectedPart {
     }
     result
   }
+
+  pub fn contains(&self, points: &[Point], p: Point) -> bool {
+    for c in &self.contours {
+      if !c.contains(points, p) {
+        return false;
+      }
+    }
+    true
+  }
+
+  pub fn get_aabb(&self, points: &[Point]) -> AABB {
+    let mut result = AABB::empty();
+    for c in &self.contours {
+      for &p in &c.points {
+        result = result.with(points[p as usize]);
+      }
+    }
+    result
+  }
 }
 
 impl ContourSet {
   pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
+    self.save_to_dxf_with_grid(path, false)
+  }
+
+  pub fn save_to_dxf_with_grid(
+    &self,
+    path: &std::path::Path,
+    with_grid: bool,
+  ) -> Result<(), String> {
     let mut drawing = Drawing::new();
 
     drawing.header.drawing_units = dxf::enums::DrawingUnits::Metric;
@@ -581,6 +611,41 @@ impl ContourSet {
       }
     }
 
+    let mut aabb = AABB::empty();
+    for part in &self.parts {
+      for contour in &part.contours {
+        for i in 0..contour.points.len() {
+          aabb = aabb.with(self.points[contour.points[i] as usize]);
+        }
+      }
+    }
+    if with_grid {
+      fn point2d_to_dxf(pt: Point) -> dxf::Point {
+        dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 }
+      }
+      let cx1: &dyn Fn(_) -> _ = &|i: isize| Point { x: aabb.x1, y: i as f32 };
+      let cx2: &dyn Fn(_) -> _ = &|i: isize| Point { x: aabb.x2, y: i as f32 };
+      let cy1: &dyn Fn(_) -> _ = &|i: isize| Point { x: i as f32, y: aabb.y1 };
+      let cy2: &dyn Fn(_) -> _ = &|i: isize| Point { x: i as f32, y: aabb.y2 };
+      for (d, lc, skip10, color) in [
+        ((aabb.y1, aabb.y2), (&cx1, &cx2), true, 254),
+        ((aabb.x1, aabb.x2), (&cy1, &cy2), true, 254),
+        ((aabb.y1, aabb.y2), (&cx1, &cx2), false, 253),
+        ((aabb.x1, aabb.x2), (&cy1, &cy2), false, 253),
+      ] {
+        for i in d.0.floor() as isize..d.1.ceil() as isize + 1 {
+          if (i % 10 == 0) == skip10 {
+            continue;
+          }
+          let p1 = lc.0(i);
+          let p2 = lc.1(i);
+          let l = Line::new(point2d_to_dxf(p1), point2d_to_dxf(p2));
+          let mut e = Entity::new(EntityType::Line(l));
+          e.common.color = dxf::Color::from_index(color);
+          drawing.add_entity(e);
+        }
+      }
+    }
     for part in &self.parts {
       for contour in &part.contours {
         let mut pl = Polyline::default();
@@ -588,19 +653,45 @@ impl ContourSet {
           fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
             dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
           }
-
           let v = point2d_to_dxf(self.points[contour.points[i] as usize]);
           pl.add_vertex(&mut drawing, v);
         }
         pl.set_is_closed(true);
-
-        drawing.add_entity(Entity::new(EntityType::Polyline(pl)));
+        let mut e = Entity::new(EntityType::Polyline(pl));
+        if with_grid {
+          e.common.color = dxf::Color::from_index(250);
+        }
+        drawing.add_entity(e);
       }
     }
 
     drawing
       .save_file(path)
       .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))
+  }
+
+  pub fn load_from_dxf(path: &std::path::Path) -> Result<Self, String> {
+    let mut result_points = Vec::new();
+    let mut fp = FragmentedParts::new();
+    let drawing = Drawing::load_file(path)
+      .map_err(|e| format!("Unable to open file {} for reading: {}", path.to_string_lossy(), e))?;
+    for e in drawing.entities() {
+      match &e.specific {
+        EntityType::Polyline(points) => {
+          let mut c = Contour::new();
+
+          for p in points.vertices() {
+            let v = Point { x: p.location.x as f32, y: p.location.y as f32 };
+            result_points.push(v);
+            c.points.push((result_points.len() - 1) as u32);
+          }
+          fp.contours.push(c);
+        }
+        _ => {}
+      }
+    }
+
+    Ok(fp.into_contour_set(result_points))
   }
 
   pub fn points_count(&self) -> usize {
@@ -650,6 +741,35 @@ impl ContourSet {
   pub fn extrude(&self, width: f32) -> Vec<crate::model::Model> {
     self.parts.iter().map(|p| p.extrude(&self.points, width)).collect()
   }
+
+  pub fn new() -> Self {
+    Self { points: Vec::new(), parts: Vec::new() }
+  }
+
+  pub fn append(&mut self, mut rhs: ContourSet) {
+    for rhsp in &mut rhs.parts {
+      for c in &mut rhsp.contours {
+        for p in &mut c.points {
+          *p += self.points.len() as u32;
+        }
+      }
+    }
+    self.points.extend(rhs.points);
+    self.parts.extend(rhs.parts);
+  }
+
+  pub fn translate(&mut self, shift: Point) {
+    for p in &mut self.points {
+      *p += shift;
+    }
+  }
+
+  pub fn rotate(&mut self, angle: f32) {
+    let angle = Point::from_angle(angle);
+    for p in &mut self.points {
+      *p = complex_mul(*p, angle);
+    }
+  }
 }
 
 impl FragmentedParts {
@@ -685,7 +805,7 @@ impl FragmentedParts {
       let pt0 = self.contours[i].points[0];
       let mut inside = (self.contours.len(), f32::INFINITY, false);
       for j in 0..self.contours.len() {
-        if i == j || squares[j].1 != 1 || !self.contours[j].contains(points, pt0) {
+        if i == j || squares[j].1 != 1 || !self.contours[j].contains_inner(points, pt0) {
           continue;
         }
 
@@ -915,7 +1035,7 @@ impl ContourCreator {
         let c11 = c;
         self.fill_cell(&mut cells[c11], x, y, part_f);
 
-        if x == szx - 1 || y == szy-1 {
+        if x == szx - 1 || y == szy - 1 {
           if cells[c11].index != 0 {
             panic!("Fail aabb in position {:?}", cells[c11].pos);
           }
@@ -1110,8 +1230,8 @@ mod tests {
   #[test]
   fn test_contains_contour4() {
     let c = Contour { points: vec![0, 1, 2, 3] };
-    assert!(c.contains(&POINTS, 8));
-    assert!(!c.contains(&POINTS, 4));
+    assert!(c.contains_inner(&POINTS, 8));
+    assert!(!c.contains_inner(&POINTS, 4));
   }
 
   #[test]

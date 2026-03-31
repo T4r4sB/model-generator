@@ -1,6 +1,6 @@
-use crate::model::*;
-use crate::points3d::*;
-use crate::solid::*;
+use common::model::*;
+use common::points3d::*;
+use common::solid::*;
 
 use std::cell::RefCell;
 
@@ -58,14 +58,15 @@ impl OctoMixupCreator {
       return 0xffffffff;
     }
 
-    const CUR_COS: f32 = 0.45;
+    const CUR_COS: f32 = 0.46;
 
-    let split_cos;
+    let split_cos = [0.51, 0.41];
+    /*
     if r > 26.0 && r < 28.0 {
       split_cos = [CUR_COS + 1.5 / 26.0, CUR_COS - 1.5 / 26.0];
     } else {
       split_cos = [CUR_COS - 1.5 / 26.0, CUR_COS + 1.5 / 26.0];
-    }
+    }*/
 
     if sqr(pos.x) + sqr(pos.y) < sqr(1.25) {
       return 0;
@@ -104,7 +105,7 @@ impl OctoMixupCreator {
         }
       }
     } else if index.count_ones() != 4 {
-      return 0;
+      //return 0;
     }
 
     return index;
@@ -112,5 +113,25 @@ impl OctoMixupCreator {
 
   pub fn get_part_index(&self, pos: Point) -> PartIndex {
     self.get_part_index_impl(pos, 8)
+  }
+  
+  pub fn get_height(&self, current_normal: usize) -> f32 {
+    0.6
+  }
+
+  pub fn get_count(&self, current_normal: usize) -> usize {
+    1
+  }
+  
+  pub fn get_name(&self, current_normal: usize) -> Option<String> {
+    None
+  }
+
+  pub fn get_quality() -> usize {
+    200
+  }
+
+  pub fn get_size() -> f32 {
+    160.0
   }
 }
