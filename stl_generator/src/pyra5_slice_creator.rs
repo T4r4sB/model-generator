@@ -37,8 +37,9 @@ pub struct Pyra5Creator {
   r41_r: Point,
 
   groove: Vec<f32>,
-  axis_pos: RefCell<Vec<(f32, Point)>>,
-  axis_neg: RefCell<Vec<(f32, Point)>>,
+  slice_groove: Vec<f32>,
+  axis_pos: RefCell<Vec<(f32, usize)>>,
+  axis_neg: RefCell<Vec<(f32, usize)>>,
 }
 
 impl Pyra5Creator {
@@ -51,8 +52,6 @@ impl Pyra5Creator {
     let ahole = max_angle - max_inner_angle;
     let ahole_inner = max_inner_angle - min_inner_angle;
 
-    let r = 4.0 / ahole;
-    println!("or={}", r + 4.8);
     let r = 6.0 / ahole_inner;
     let r = f32::max(r, 20.0);
 
@@ -70,14 +69,31 @@ impl Pyra5Creator {
     ];*/
 
     let groove = vec![
+      1.0,
+      r - 5.4,
+      (8.5 / (r - 5.6)).cos(),
+      r - 3.4,
+      (5.0 / (r - 5.6)).cos(),
+      r - 1.4,
       (max_inner_angle - 0.0 / r).cos(),
-      r + 0.2,
+      r + 0.6,
       (max_inner_angle - 4.0 / r).cos(),
       r + 2.6,
       (max_inner_angle - 0.0 / r).cos(),
     ];
 
-    println!("ir={}", r + 4.8);
+    let min_core_r = (16.0) / (PI / 2.0);
+    assert!(r - 9.6 >= min_core_r);
+
+    let slice_groove = vec![
+      (PI * 0.25 + 4.0 / (r - 7.6)).cos(),
+      r - 7.4,
+      (PI * 0.25 + 1.5 / (r - 7.6)).cos(),
+      r - 5.4,
+      0.0,
+    ];
+
+    println!("r={}", r);
 
     let tr = 0.75.sqrt();
 
@@ -87,6 +103,9 @@ impl Pyra5Creator {
       Point { x: -tr, y: 0.0, z: -0.5 },
       Point { x: 0.0, y: tr, z: -0.5 },
       Point { x: tr, y: 0.0, z: -0.5 },
+      // slice_axis
+      Point { x: 1.0, y: 0.0, z: 0.0 },
+      Point { x: 0.0, y: 1.0, z: 0.0 },
     ];
 
     let mut normals = vec![
@@ -99,7 +118,7 @@ impl Pyra5Creator {
 
     let mut holes = axis.iter().copied().map(|v| -v).collect();
 
-    if true {
+    if false {
       // saurus
       for dst in [&mut axis, &mut normals, &mut holes] {
         for v in dst {
@@ -160,6 +179,7 @@ impl Pyra5Creator {
       r41_r,
 
       groove,
+      slice_groove,
       axis_pos,
       axis_neg,
     }
@@ -178,6 +198,20 @@ impl Pyra5Creator {
   }
 
   pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
+    if current_normal == 0 {
+      return self.get_part_index_impl(Point { x: 0.0, y: pos.x, z: pos.y }, 5);
+    }
+    if current_normal == 1 {
+      return self.get_part_index_impl(Point { x: pos.x, y: 0.0, z: pos.y }, 5);
+    }
+    if current_normal == 2 {
+      return self
+        .get_part_index_impl(Point { x: pos.x * 0.5.sqrt(), y: pos.x * 0.5.sqrt(), z: pos.y }, 5);
+    }
+    if current_normal == 3 {
+      return self.get_part_index_impl(Point { x: pos.x, y: pos.y, z: 0.0 }, 5);
+    }
+
     let n = self.normals[current_normal];
 
     fn sinc(x: f32) -> f32 {
@@ -222,15 +256,15 @@ impl Pyra5Creator {
   }
 
   pub fn faces(&self) -> usize {
-    self.normals.len()
+    self.normals.len() * 1
   }
 
   pub fn get_quality() -> usize {
-    100
+    320
   }
 
   pub fn get_size() -> f32 {
-    120.0
+    110.0
   }
 
   pub fn get_part_index_impl(&self, pos: Point, current_normal: usize) -> PartIndex {
@@ -240,41 +274,21 @@ impl Pyra5Creator {
 
     let r = pos.len();
 
-    if r > self.groove[3] - 0.5 {
-      //return 0;
+    if r > self.groove[3] + 1.2 {
+      // return 0;
     }
 
-    let inner_r = self.groove[1] - 2.2;
-    if r < inner_r {
-      return 0; //tmp
-
-
-      if r > inner_r - 0.3 || r < inner_r - 5.3 {
-        return 0;
-      }
-      let mut index = 33;
-
-      //let small_cos = (5.0/8.0).sqrt();
-      let flat_r = inner_r; // * small_cos;
-
-      for (i, &a) in self.axis.iter().enumerate() {
-        let d = dot(pos, a);
-        let s = cross(pos, a).len();
-        if d > 0.0 && s < 1.5 {
+    let inner_r = self.slice_groove[1] - 7.4;
+    
+    /*if r < inner_r - 0.2 {
+      for a in 5..=6 {
+        if dot(pos, self.axis[a]) > 0.0 && cross(pos, self.axis[a]).len() < 1.2 {
           return 0;
         }
       }
 
-      for (i, &h) in self.holes.iter().enumerate() {
-        let d = dot(pos, h);
-        let s = cross(pos, h).len();
-        if d > 0.0 && s < 8.0 {
-          return 0;
-        }
-      }
-
-      return index;
-    }
+      return 31;
+    }*/
 
     let m = self.groove[self.groove.len() - 2] + 2.2;
     let mut cup = false;
@@ -321,17 +335,26 @@ impl Pyra5Creator {
       }
     }
 
-      if !cup {
-        for &a in &self.axis {
-          let d = dot(pos, a);
-          let s = cross(pos, a).len();
-          if d > 0.0 && s < 1.20 {
-            return 0;
-          }
+    /*
+    if !cup {
+      for &a in &self.axis {
+        let d = dot(pos, a);
+        let s = cross(pos, a).len();
+        if d > 0.0 && s < 1.20 {
+          return 0;
         }
       }
+    }
+    */
 
     let (mut shift_out, mut shift_in, inter) = get_groove(r, &self.groove, 0.03);
+    let (mut s_shift_out, mut s_shift_in, s_inter) = get_groove(r, &self.slice_groove, 0.03);
+
+    let rat = (self.slice_groove[1] - 0.2) / r;
+    if rat > 1.0 {
+      s_shift_out *= rat;
+      s_shift_in *= rat;
+    }
 
     let mut axis_pos = self.axis_pos.borrow_mut();
     let mut axis_neg = self.axis_neg.borrow_mut();
@@ -342,29 +365,42 @@ impl Pyra5Creator {
     let mut index: PartIndex = 0;
 
     let mut match_all = || -> Option<()> {
-      let mut match_axis =
-        |pos: Point, index: &mut PartIndex, bit: usize, axis: Point| -> Option<()> {
-          let d = dot(pos, axis) / r;
+      let mut match_axis = |pos: Point,
+                            index: &mut PartIndex,
+                            bit: usize,
+                            axis: Point,
+                            factor: f32,
+                            shift_in: f32,
+                            shift_out: f32|
+       -> Option<()> {
+        let d = dot(pos, axis) / r;
 
-          let check_in = d - shift_in;
-          if check_in > 0.0 {
-            *index |= (1 << bit);
-            axis_pos.push((check_in, axis));
+        let check_in = d - shift_in;
+        if check_in > 0.0 {
+          *index |= (1 << bit);
+          axis_pos.push((check_in * factor, bit));
+        } else {
+          let check_out = shift_out - d;
+          if check_out > 0.0 {
+            axis_neg.push((check_out * factor, bit));
           } else {
-            let check_out = shift_out - d;
-            if check_out > 0.0 {
-              axis_neg.push((check_out, axis));
-            } else {
-              return None;
-            }
+            return None;
           }
+        }
 
-          return Some(());
-        };
+        return Some(());
+      };
       for i in 0..self.axis.len() {
-        match_axis(pos, &mut index, i, self.axis[i])?;
+        if i < 5 {
+          if r > self.groove[1] - 0.2 {
+            match_axis(pos, &mut index, i, self.axis[i], 1.0, shift_in, shift_out)?;
+          }
+        } else {
+          if i == 5 || index & 31 != 1 {
+            match_axis(pos, &mut index, i, self.axis[i], r / 30.0, s_shift_in, s_shift_out)?;
+          }
+        }
       }
-
       if index != 1 {
         //return None;
       }
@@ -376,32 +412,66 @@ impl Pyra5Creator {
       return 0;
     }
 
-    
     if index.count_ones() != 1 {
-      //return 0; // tmp
+      // return 0; // tmp
+    }
+
+    if index & 31 == 0 {
+      let b1 = r - self.groove[self.groove.len() - 4];
+      let x = pos.x.signum();
+      let y = pos.y.signum();
+      let b2 = dot(pos, Point { x, y: -y, z: 0.0 }.norm()).abs();
+      let b3 = dot(pos, Point { x, y, z: -3.3 }.norm()).abs();
+    
+      if b1 > 2.2 || (b2 > 2.1 || b3 > 2.1) && b1 > 0.2 {
+        index += 128
+      } else if b1 > 2.0 || (b2 > 1.9 || b3 > 1.9) && b1 > 0.0 {
+        return 0;
+      }
     }
 
     if index == 0 {
-      if pos.x < 0.0 || pos.y < 0.0 {
-        return 0;
-      }
-      axis_neg.push((pos.x * 0.03, Point::X));
-      axis_neg.push((pos.y * 0.03, Point::Y));
       index = 31;
+    } else if r < inner_r + 0.2 || true{ // true: tmp
+      return 0;
     }
 
-    let thick = index.count_ones() == 3
+    if r < self.groove[self.groove.len() - 2] {
+      for a in 5..=6 {
+        let d = dot(pos, self.axis[a]);
+        let hole_r = if d < inner_r + 2.0 { 1.5 } else { 3.2 };
+        if d > 0.0 && cross(pos, self.axis[a]).len() < hole_r {
+          return 0;
+        }
+      }
+    }
+
+    for a in 5..=6 {
+      if index == 1 << a {
+        let a = self.axis[a as usize];
+        if r < self.slice_groove[1] && dot(pos, a) < 7.6 && cross(pos, a).len() > 9.8 {
+          return 0;
+        }
+      }
+    }
+
+    let thick = (index & 31).count_ones() == 3
       && r > self.groove[self.groove.len() - 4] - 0.2
       && r < self.groove[self.groove.len() - 2] + 0.2;
 
-    let mut rr = if index.count_ones() == 4 {
+    let outc = (index & 31).count_ones() == 1 
+      && r > self.groove[self.groove.len() - 8] - 0.2
+      && r < self.groove[self.groove.len() - 6] + 0.2;
+
+
+    let mut rr = if (index & 31).count_ones() == 4 {
       if thick {
         0.1f32
       } else {
         0.3f32
       }
     } else {
-      if thick {
+      if thick || outc {
         0.3f32
       } else {
         1.0f32
@@ -433,19 +503,48 @@ impl Pyra5Creator {
       return f32::INFINITY;
     };
 
-    if axis_pos.len() >= 2 {
-      let d = dot(axis_pos[0].1, axis_pos[1].1);
-      if !thick || d > 0.0 {
-        minimal = f32::min(minimal, in_sr(axis_pos[0].0, axis_pos[1].0, rr));
+    let outer_edge = (index & 31).count_ones() == 2;
+
+    for p0 in 0..axis_pos.len() {
+      if outer_edge && axis_pos[p0].1 >= 5 {
+        continue;
+      }
+      if r < self.groove[1] - 0.2 && axis_pos[p0].1 < 5 {
+        continue;
+      }
+      for p1 in p0 + 1..axis_pos.len() {
+        if outer_edge && axis_pos[p1].1 >= 5 {
+          continue;
+        }
+        if r < self.groove[1] - 0.2 && axis_pos[p0].1 < 5 {
+          continue;
+        }
+        let d = dot(self.axis[axis_pos[p0].1], self.axis[axis_pos[p1].1]);
+        if !thick || d > -0.01 {
+          minimal = f32::min(minimal, in_sr(axis_pos[p0].0, axis_pos[p1].0, rr));
+        }
       }
     }
-    if axis_neg.len() >= 2 {
-      minimal = f32::min(minimal, in_sr(axis_neg[0].0, axis_neg[1].0, rr));
-    }
-    if !inter && axis_pos.len() >= 1 && axis_neg.len() >= 1 {
-      let d = dot(axis_pos[0].1, axis_neg[0].1);
-      if d > 0.0 {
-        minimal = f32::min(minimal, in_sr(axis_pos[0].0, axis_neg[0].0, rr));
+
+    if !outer_edge {
+      for n0 in 0..axis_neg.len() {
+        for n1 in n0 + 1..axis_neg.len() {
+          let d = dot(self.axis[axis_neg[n0].1], self.axis[axis_neg[n1].1]);
+          if !thick || d > -0.01 {
+            minimal = f32::min(minimal, in_sr(axis_neg[n0].0, axis_neg[n1].0, rr));
+          }
+        }
+      }
+
+      if !s_inter {
+        for p0 in 0..axis_pos.len() {
+          for n0 in 0..axis_neg.len() {
+            let d = dot(self.axis[axis_pos[p0].1], self.axis[axis_neg[n0].1]);
+            if d > -0.01 {
+              minimal = f32::min(minimal, in_sr(axis_pos[p0].0, axis_neg[n0].0, rr));
+            }
+          }
+        }
       }
     }
 

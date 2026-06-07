@@ -302,7 +302,7 @@ impl Perfect {
   pub fn produce_in_gear(&self, profile: Profile) -> Result<InGear, String> {
     let r_in = f32::max(profile.teeth_overlap_r(), profile.basic_r());
     let r_out = profile.max_possible_r();
-    let evo_out_tan = 0.0;
+    let evo_out_tan = cath(r_out / profile.basic_r(), 1.0);
     Ok(InGear { profile, evo_out_tan, r_in, r_out })
   }
 }
@@ -324,7 +324,7 @@ impl Chisel {
   pub fn old_m1_z26() -> Self {
     Self::by_profile_and_tan(Profile { z: 26, x: -0.540 }, 0.0)
   }
-  
+
   pub fn new_m1_z38() -> Self {
     Self::by_profile_and_tan(Profile { z: 38, x: 0.105 }, 0.17647)
   }
@@ -423,15 +423,50 @@ impl Chisel {
   }
 }
 
+pub trait Instrument {
+  fn produce_in_gear(&self, profile: Profile) -> Result<InGear, String>;
+  fn produce_out_gear(&self, profile: Profile) -> Result<OutGear, String>;
+}
+
+impl Instrument for Rail {
+  fn produce_in_gear(&self, _: Profile) -> Result<InGear, String> {
+    Err("Impossible to produce inner gear by rail!".to_owned())
+  }
+
+  fn produce_out_gear(&self, profile: Profile) -> Result<OutGear, String> {
+    Rail::produce_out_gear(self, profile)
+  }
+}
+
+impl Instrument for Chisel {
+  fn produce_in_gear(&self, profile: Profile) -> Result<InGear, String> {
+    Chisel::produce_in_gear(self, profile)
+  }
+
+  fn produce_out_gear(&self, profile: Profile) -> Result<OutGear, String> {
+    Chisel::produce_out_gear(self, profile)
+  }
+}
+
+impl Instrument for Perfect {
+  fn produce_in_gear(&self, profile: Profile) -> Result<InGear, String> {
+    Perfect::produce_in_gear(self, profile)
+  }
+
+  fn produce_out_gear(&self, profile: Profile) -> Result<OutGear, String> {
+    Perfect::produce_out_gear(self, profile)
+  }
+}
+
 pub trait Couple {
   type G1: Gear;
   type G2: Gear;
 
-  fn inner(&self) -> bool;
+  fn inner() -> bool;
 
-  fn produce_g1(instrument: &Chisel, profile: Profile) -> Result<Self::G1, String>;
+  fn produce_g1(instrument: &impl Instrument, profile: Profile) -> Result<Self::G1, String>;
 
-  fn produce_g2(instrument: &Chisel, profile: Profile) -> Result<Self::G2, String>;
+  fn produce_g2(instrument: &impl Instrument, profile: Profile) -> Result<Self::G2, String>;
 
   fn new_g2_couple(instrument: &Chisel, profile: Profile) -> Result<Self, String>
   where
@@ -529,6 +564,8 @@ pub trait Couple {
     self.cut2_by_top_w(w);
   }
 
+  fn adjust_inner_radius(&mut self, radial_gap: f32);
+
   fn get_couple_length(&self) -> f32 {
     Self::angle_dist_to_length(self.get_angle(), self.get_dist())
   }
@@ -542,15 +579,15 @@ impl Couple for OutCouple {
   type G1 = OutGear;
   type G2 = OutGear;
 
-  fn inner(&self) -> bool {
+  fn inner() -> bool {
     false
   }
 
-  fn produce_g1(instrument: &Chisel, profile: Profile) -> Result<OutGear, String> {
+  fn produce_g1(instrument: &impl Instrument, profile: Profile) -> Result<OutGear, String> {
     instrument.produce_out_gear(profile)
   }
 
-  fn produce_g2(instrument: &Chisel, profile: Profile) -> Result<OutGear, String> {
+  fn produce_g2(instrument: &impl Instrument, profile: Profile) -> Result<OutGear, String> {
     instrument.produce_out_gear(profile)
   }
 
@@ -645,6 +682,11 @@ impl Couple for OutCouple {
     self.cut2(hypot(self.g2.profile.basic_r(), l) - MINIMAL_RADIAL_GAP);
   }
 
+  fn adjust_inner_radius(&mut self, radial_gap: f32) {
+    self.g1.r_in = self.dist - self.g2.r_out - radial_gap;
+    self.g2.r_in = self.dist - self.g1.r_out - radial_gap;
+  }
+
   fn get_top_w1(&self) -> f32 {
     self.g1.top_w()
   }
@@ -674,15 +716,15 @@ impl Couple for InCouple {
   type G1 = OutGear;
   type G2 = InGear;
 
-  fn inner(&self) -> bool {
+  fn inner() -> bool {
     true
   }
 
-  fn produce_g1(instrument: &Chisel, profile: Profile) -> Result<OutGear, String> {
+  fn produce_g1(instrument: &impl Instrument, profile: Profile) -> Result<OutGear, String> {
     instrument.produce_out_gear(profile)
   }
 
-  fn produce_g2(instrument: &Chisel, profile: Profile) -> Result<InGear, String> {
+  fn produce_g2(instrument: &impl Instrument, profile: Profile) -> Result<InGear, String> {
     instrument.produce_in_gear(profile)
   }
 
@@ -768,6 +810,11 @@ impl Couple for InCouple {
   fn cut2_by_interference(&mut self) {
     let l = self.length + self.g1.evo_couple_part();
     self.cut2(hypot(self.g2.profile.basic_r(), l) + MINIMAL_RADIAL_GAP);
+  }
+
+  fn adjust_inner_radius(&mut self, radial_gap: f32) {
+    self.g1.r_in = self.g2.r_in - self.dist - radial_gap;
+    self.g2.r_out = self.dist + self.g1.r_out + radial_gap;
   }
 
   fn get_top_w1(&self) -> f32 {

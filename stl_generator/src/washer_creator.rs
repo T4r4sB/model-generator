@@ -55,7 +55,7 @@ impl WasherCreator {
       if pos.z < 0.0 {
         return 0;
       }
-      if pos.z > 3.0 {
+      if pos.z > 1.2 {
         return 0;
       }
       let r = (sqr(pos.x) + sqr(pos.y)).sqrt();
@@ -68,7 +68,7 @@ impl WasherCreator {
       if pos.z < 0.5 {
         return 1;
       }
-      if r < 2.0 && pos.z > 1.0 + (2.1 - r) {
+      if r < 2.0 && pos.z > 0.4 + (2.1 - r) {
         return 0;
       }
       return 1;

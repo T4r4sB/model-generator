@@ -1,6 +1,6 @@
-use crate::model::*;
-use crate::points3d::*;
-use crate::solid::*;
+use common::model::*;
+use common::points3d::*;
+use common::solid::*;
 
 use std::cell::RefCell;
 
@@ -45,12 +45,32 @@ impl BananaCreator {
     }
   }
 
+  pub fn faces(&self) -> usize {
+    0
+  }
+
+  pub fn get_height(&self, current_normal: usize) -> f32 {
+    0.6
+  }
+
+  pub fn get_count(&self, current_normal: usize) -> usize {
+    1
+  }
+
+  pub fn get_name(&self, current_normal: usize) -> Option<String> {
+    None
+  }
+
   pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
     0
   }
 
-  pub fn faces(&self) -> usize {
-    0
+  pub fn get_quality() -> usize {
+    120
+  }
+
+  pub fn get_size() -> f32 {
+    120.0
   }
 
   pub fn get_part_index_impl(&self, pos: Point, current_normal: usize) -> PartIndex {

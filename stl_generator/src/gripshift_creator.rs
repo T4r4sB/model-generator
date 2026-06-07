@@ -62,7 +62,7 @@ impl GripshiftCreator {
   }
 
   pub fn get_quality() -> usize {
-    512
+    100
   }
 
   pub fn get_size() -> f32 {
@@ -100,6 +100,17 @@ impl GripshiftCreator {
       }
 
       return 0;
+    }
+
+    if x > min_x - 19.0 && x < min_x + 1.0 && r < drum_min_r + 2.0 {
+      if pos.y.abs() > 3.0 && pos.z.abs() > 3.0 {
+        if r > drum_min_r && x > min_x - 3.0 && x < min_x + 1.0 && r < drum_min_r + 2.0
+          || x > min_x - 3.0 && x < min_x - 1.0 && r < drum_min_r + 2.0
+          || x > min_x - 19.0 && x < min_x - 1.0 && r < drum_min_r - 0.5
+        {
+          return z_to_i(pos.z, false);
+        }
+      }
     }
 
     if r > drum_max_r + 0.5 && x > -30.0 && x < cable1_x + cable2_x
@@ -173,7 +184,8 @@ impl GripshiftCreator {
               return false;
             }
             if angle && (d1 < 6.1 || last_axle < -ten_y + 2.0 || corpse_y > 2.0) {
-              if rot1 > rot2.abs() + 0.3 && (d1 < 5.9 || last_axle < -ten_y + 2.0 || corpse_y > 2.2) {
+              if rot1 > rot2.abs() + 0.3 && (d1 < 5.9 || last_axle < -ten_y + 2.0 || corpse_y > 2.2)
+              {
                 cup = true;
               } else {
                 return false;
@@ -237,8 +249,8 @@ impl GripshiftCreator {
         return 0;
       }
     }
+    return 0; // tmp
 
-    return 0; // tmp;
 
     if (r < drum_max_r && x > 3.0 || r < drum_max_r + 10.0 && x > cable1_x + cable2_x + 0.5)
       && r > drum_min_r + f32::clamp(x - (max_x - 5.0), 0.0, 2.0)

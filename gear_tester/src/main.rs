@@ -144,8 +144,7 @@ where
   let new = Chisel::new_m1_z26();
   let old = Chisel::old_m1_z26();
 
-  let (gnew, gold) =
-    test_two_instruments::<C>(x1, x2, &new, &old, config);
+  let (gnew, gold) = test_two_instruments::<C>(x1, x2, &new, &old, config);
 
   let ix1 = x1.div_euclid(0.2) as i32;
   let ix2 = x2.div_euclid(0.2) as i32;
@@ -173,6 +172,45 @@ fn test_rail(x1: f32, x2: f32, config: &Config) -> Vec<ResultWithCoords> {
         println!("By rail:");
         print_couple_stats(&c);
         draw_couple(&c, "gears_by_rail.dxf");
+      }
+
+      Ok(couple_stats(&c))
+    }
+    Err(err) => Err(err),
+  };
+
+  vec![ResultWithCoords { ix1, ix2, g, important: true }]
+}
+
+fn test_perfect<C: Couple + std::fmt::Debug>(
+  x1: f32,
+  x2: f32,
+  config: &Config,
+) -> Vec<ResultWithCoords>
+where
+  C::G1: std::fmt::Debug,
+  C::G2: std::fmt::Debug,
+{
+  let r = Perfect::new();
+  let p1 = Profile { z: config.z1, x: x1 };
+  let p2 = Profile { z: config.z2, x: x2 };
+
+  let ix1 = x1.div_euclid(0.2) as i32;
+  let ix2 = x2.div_euclid(0.2) as i32;
+
+  let c: Result<C, GearError> = compose_gear_results(C::produce_g1(&r, p1), C::produce_g2(&r, p2));
+
+  let g = match c {
+    Ok(mut c) => {
+      c.cut_by_radial_gap(0.25);
+      c.cut1_by_interference();
+      c.cut2_by_interference();
+      c.adjust_inner_radius(0.25);
+
+      if config.show {
+        println!("By perfect:");
+        print_couple_stats(&c);
+        draw_couple(&c, "gears_by_perfect.dxf");
       }
 
       Ok(couple_stats(&c))
@@ -300,21 +338,23 @@ fn test_planet(x1: f32, x2: f32, config: &Config) -> Vec<ResultWithCoords> {
 
 fn test(x1: f32, x2: f32, config: &Config) -> Vec<ResultWithCoords> {
   // test_chisel::<InCouple>(x1, x2, config)
- // test_chisel::<OutCouple>(x1, x2, config)
-  test_planet(x1, x2, config)
- // test_rail(x1, x2, &config)
+  // test_chisel::<OutCouple>(x1, x2, config)
+  // test_planet(x1, x2, config)
+  // test_rail(x1, x2, config)
+
+  test_perfect::<InCouple>(x1, x2, &config)
 }
 
 fn main() {
-  // 23|20|61 => R=36.3; D=72.6
-  // 23|22|64 => R=38.1; D=76.2
-
-  let mut config = Config { z1: 26, z2: 14, z3: 55, show: false, radial_gap: None };
+  let mut config = Config { z1: 9, z2: 24, z3: 70, show: false, radial_gap: None };
 
   config.show = true;
 
   if config.show {
-    test(0.7, 0.9, &config);
+    let d = OutCouple::dist(Profile { z: 4, x: 1.2 }, Profile { z: 12, x: 0.2 }).unwrap();
+    println!("d={d}");
+    let c = InCouple::sum_of_corrections(9, 24, d);
+    test(0.6, c+0.6, &config);
     println!("Couple printed");
     return;
   }

@@ -27,10 +27,10 @@ const COS0: f32 = 0.9396926;
 const TAN0: f32 = 0.36397022;
 const T0: f32 = 0.01490438;
 
-//const GEAR_ERR: f32 = 0.06;
-//const ERR: f32 = 0.1;
-const GEAR_ERR: f32 = 0.00;
-const ERR: f32 = 0.0;
+const GEAR_ERR: f32 = 0.06;
+const ERR: f32 = 0.1;
+//const GEAR_ERR: f32 = 0.00;
+//const ERR: f32 = 0.0;
 
 const GAP: f32 = 0.1;
 
@@ -1632,7 +1632,7 @@ impl ControlRingPawlSystem {
 
     let big_ring_hole = z > rz1 - facet - ERR && z < rz2 + facet + ERR;
 
-    if z > rz1 + ERR && z < rz2 - ERR {
+    if z > rz1 + GAP + ERR && z < rz2 - GAP - ERR {
       let rr = (proj - self.ring_center_hi_fa).len();
       if rr > self.ring_r + ERR && rr < self.ring_r + 3.0 - ERR {
         return ControlPawlResult::ControlRing;
@@ -1921,16 +1921,8 @@ impl SwampTodCreator {
     .orientation(points2d::Point::from_angle(-PI / 2.0));
 
     let sections = [
-      Section { kind: SectionKind::Z(gear11_ps.ball_z() + 1.0), name: "ball11".to_owned() },
-      Section { kind: SectionKind::Z(gear12_ps.ball_z() + 1.0), name: "ball12".to_owned() },
-      Section { kind: SectionKind::Z(gear21_ps.ball_z() + 1.0), name: "ball21".to_owned() },
-      Section { kind: SectionKind::Z(gear22_ps.ball_z() + 1.0), name: "ball22".to_owned() },
       Section { kind: SectionKind::X, name: "section-x".to_owned() },
       Section { kind: SectionKind::Y, name: "section-y".to_owned() },
-      Section { kind: SectionKind::Z(gear11_ps.ps.z1 + 1.0), name: "pawl11".to_owned() },
-      Section { kind: SectionKind::Z(gear12_ps.ps.z1 + 1.0), name: "pawl12".to_owned() },
-      Section { kind: SectionKind::Z(gear21_ps.ps.z1 + 1.0), name: "pawl21".to_owned() },
-      Section { kind: SectionKind::Z(gear22_ps.ps.z1 + 1.0), name: "pawl22".to_owned() },
     ]
     .into_iter()
     .collect();
@@ -2932,7 +2924,6 @@ impl SwampTodCreator {
     let r = proj.len();
     let a = f32::atan2(proj.y, proj.x);
 
-    
     let index = self.match_first_block(proj, pos.z, r, a);
     if index != 0 {
       return index;
@@ -2948,7 +2939,7 @@ impl SwampTodCreator {
     }
     let index = self.match_axis(proj, pos.z, r, a, pos);
     if index != 0 {
-    /*  if index == self.config.part_axle {
+      /*  if index == self.config.part_axle {
         if proj.y > proj.x + ERR * 2.0.sqrt() {
           return index;
         } else if proj.y < proj.x - ERR * 2.0.sqrt() {
@@ -2959,7 +2950,7 @@ impl SwampTodCreator {
       }*/
       return index;
     }
-    
+
     let index = self.match_right_side(proj, pos.z, r, a, pos);
     if index != 0 {
       return index;
@@ -2968,7 +2959,7 @@ impl SwampTodCreator {
     if index != 0 {
       return index;
     }
-    
+
     /*
     let index = self.match_stand(proj, pos.z, r, a, pos);
     if index != 0 {
@@ -3022,7 +3013,7 @@ impl SwampTodCreator {
   }
 
   pub fn get_quality() -> usize {
-    384
+    100
   }
 
   pub fn get_size() -> f32 {

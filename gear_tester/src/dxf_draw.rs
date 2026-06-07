@@ -113,14 +113,14 @@ fn write_gear_to_dxf(dxf: &mut dxf::Drawing, g: &dyn Gear, pos: (f32, f32), phas
   ))));
 }
 
-pub fn draw_center_line(drawing: &mut dxf::Drawing, c: &(impl Couple + std::fmt::Debug)) {
-   let d = c.get_dist();
+pub fn draw_center_line<C: Couple >(drawing: &mut dxf::Drawing, c: &C) {
+  let d = c.get_dist();
   write_line_to_dxf(drawing, (d, 0.0), (0.0, 0.0));
 }
 
-pub fn draw_couple_lines(drawing: &mut dxf::Drawing, c: &(impl Couple + std::fmt::Debug)) {
+pub fn draw_couple_lines<C: Couple >(drawing: &mut dxf::Drawing, c: &C) {
   let mut l = c.get_couple_length();
-  if c.inner() {
+  if C::inner() {
     l += c.get_g1().total_couple_part();
   }
 
@@ -137,10 +137,10 @@ pub fn draw_couple_lines(drawing: &mut dxf::Drawing, c: &(impl Couple + std::fmt
   write_line_to_dxf(drawing, (x1, -y1), (x2, -y2));
 }
 
-pub fn draw_couple_gears(drawing: &mut dxf::Drawing, c: &(impl Couple + std::fmt::Debug)) {
+pub fn draw_couple_gears<C: Couple >(drawing: &mut dxf::Drawing, c: &C) {
   let d = c.get_dist();
   let mut phase_2 = c.get_g1().profile().z as f32 * 0.5 + 0.5;
-  if c.inner() {
+  if C::inner() {
     phase_2 = 0.0;
   }
   write_gear_to_dxf(drawing, c.get_g1(), (d, 0.0), 0.0);
@@ -156,7 +156,6 @@ pub fn draw_couple(c: &(impl Couple + std::fmt::Debug), filename: &str) {
 
   drawing.save_file(filename).unwrap();
 }
-
 
 pub fn draw_planet_couple_gears(drawing: &mut dxf::Drawing, oc: &OutCouple, ic: &InCouple) {
   let d = oc.get_dist();

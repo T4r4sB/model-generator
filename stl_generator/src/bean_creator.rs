@@ -72,11 +72,11 @@ impl BeanCreator {
     let axis_neg = RefCell::new(Vec::new());
 
     let groove = vec![
-      (maximal_angle + 0.03 / sphere_r).cos(),
+      (maximal_angle + 0.15 / sphere_r).cos(),
       sphere_r + 0.2,
-      (maximal_angle - 0.17 / sphere_r).cos(),
+      (maximal_angle - 0.05 / sphere_r).cos(),
       sphere_r + 5.0,
-      (maximal_angle + 0.03 / sphere_r).cos(),
+      (maximal_angle + 0.15 / sphere_r).cos(),
     ];
 
     let mut axis1 = Vec::new();
@@ -311,7 +311,7 @@ impl BeanCreator {
       }
     }
 
-    let mut sum_a = Point::zero();
+    let mut sum_a = Point::ZERO;
     for i in 0..self.axis.len() {
       if index & (1 << i) != 0 {
         sum_a += self.axis[i];

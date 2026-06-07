@@ -31,14 +31,13 @@ use common::points2d::AABB;
 use common::points3d::*;
 use common::solid::*;
 
+
+mod bean_creator;
+type PartCreator = bean_creator::BeanCreator;
+
+
 //mod railroad_creator;
 //type PartCreator = railroad_creator::RailroadCreator;
-
-//mod swamp_tod2_creator;
-//type PartCreator = swamp_tod2_creator::SwampTodCreator;
-
-mod sphere_creator;
-type PartCreator = sphere_creator::SphereCreator;
 
 pub mod gl {
   #![allow(clippy::all)]
@@ -406,7 +405,6 @@ impl Renderer {
             println!("{}", msg);
           }
 
-          /*
           let ex = cc.extrude(h);
 
           let single_j = ex.len() == 1;
@@ -430,7 +428,7 @@ impl Renderer {
             appended.save_to_stl(&std::path::Path::new("extruded").join(format!("{name}.stl")))
           {
             println!("{}", msg);
-          }*/
+          }
         }
       }
 
@@ -463,11 +461,14 @@ impl Renderer {
       for (&m_index, m) in &mut models {
         sum_v += m.vertices.len();
         max_v = std::cmp::max(max_v, m.vertices.len());
-        m.validate_and_delete_small_groups();
+      //  m.validate_and_delete_small_groups();
         let smooth_cnt = quality / 50;
-        for i in 0..smooth_cnt {
-          m.smooth(0.4);
-          println!("make model smooth, progress [{i}/{smooth_cnt}]");
+        if smooth_cnt > 0 {
+          println!();
+          for i in 0..smooth_cnt {
+            m.smooth(0.4);
+            print!("\rmake model {m_index} smooth, progress [{i}/{smooth_cnt}]");
+          }
         }
         if quality > 300 {
           println!("tcount before = {}", m.triangles.len());
@@ -484,17 +485,19 @@ impl Renderer {
 
         weights.push((m_index, volume * 7.850 * 0.001));
 
-        println!(
-          "save {m_index} to stl... {} vertices {} triangles {} volume {} mass",
-          m.vertices.len(),
-          m.triangles.len(),
-          volume,
-          volume * 7.850 * 0.001
-        );
-        if let Err(msg) =
-          m.save_to_stl(&std::path::Path::new("output").join(format!("output_{}.stl", m_index)))
-        {
-          println!("{}", msg);
+        if quality > 30 {
+          println!(
+            "save {m_index} to stl... {} vertices {} triangles {} volume {} mass",
+            m.vertices.len(),
+            m.triangles.len(),
+            volume,
+            volume * 7.850 * 0.001
+          );
+          if let Err(msg) =
+            m.save_to_stl(&std::path::Path::new("output").join(format!("output_{}.stl", m_index)))
+          {
+            println!("{}", msg);
+          }
         }
       }
 
@@ -525,7 +528,19 @@ impl Renderer {
           }
         }*/
 
-        let color = (m_index + 1).wrapping_mul(0x274381) as u32 | 0x404040;
+
+        let color = match m_index / 10000  {
+          1 => 0x00FF00,
+          2 => 0xFF2000,
+          3 => 0xEEEEEE,
+          4 => 0x0080FF,
+          5 => 0xFF8000,
+          6 => 0xFFFF00,
+          7 => 0xFF00FF,
+          8 => 0xFF80FF,
+          _ =>  (m_index + 1).wrapping_mul(0x274381) as u32 | 0x404040
+        };
+
         m.write_to_buffer(&mut array_buffer, color);
       }
 

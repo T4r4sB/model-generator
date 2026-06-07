@@ -102,9 +102,10 @@ pub struct ChaingearCreator {
 impl ChaingearCreator {
   pub fn new() -> Self {
     let gears = vec![
-      GearContour::new(18, "18-rear"),
-      GearContour::new(19, "19-rear"),
+      GearContour::new(21, "21-rear"),
+      GearContour::new(24, "24-rear"),
       GearContour::new(27, "27-rear"),
+      GearContour::new(35, "35-rear"),
     ];
 
     Self { gears }
@@ -169,11 +170,39 @@ impl ChaingearCreator {
     if part_index < self.gears.len() {
       let g = &self.gears[part_index];
 
-      if GearContour::in_driver_hole(pos) {
+      if GearContour::in_driver_hole_6(pos) {
         return 0;
       }
 
-      if part_index < 2 {
+      if part_index < 20 {
+        
+        let mut prev = Point::ZERO;
+        let mut first = Point::ZERO;
+        let mut ok = false;
+
+        let mut d = [f32::INFINITY; 20];
+        let maxr = g.tc as f32 * 12.7 / PI / 2.0 - 10.0;
+        d[0] = r - 25.0;
+        d[1] = maxr - r;
+
+        let cnt = g.tc / 3 - 1;
+        let step = (cnt - 2) / 2;
+
+        for i in 0..cnt {
+          let a1 = i as f32 / cnt as f32 * 2.0 * PI;
+          let a2 = (i + step) as f32 / cnt as f32 * 2.0 * PI;
+          let pp1 = Point::from_angle(a1).scale(maxr);
+          let pp2 = Point::from_angle(a2).scale(maxr);
+          d[i + 2] = dist_pl(pos, pp1, pp2) - 3.0;
+        }
+        d.sort_by(|a, b| a.partial_cmp(&b).unwrap());
+        if d[0] > 0.0 {
+          let rr = 2.0;
+          if sqr(rr - f32::min(d[0], rr)) + sqr(rr - f32::min(d[1], rr)) < sqr(rr) {
+            return 0;
+          }
+        }
+      } else if part_index < 2 {
         for i in 0..15 {
           let a = i as f32 / 15.0 * 2.0 * PI;
           let a = Point::from_angle(a).scale(g.inner_r() * 0.5 + 11.0);
@@ -183,7 +212,7 @@ impl ChaingearCreator {
           }
         }
       } else {
-        for i in 0 .. 3 {
+        for i in 0..3 {
           let angle = f32::atan2(pos.y, pos.x) - i as f32 * 2.0 * PI / 3.0;
           let angle = angle.rem_euclid(2.0 * PI);
           let r = pos.len();

@@ -162,8 +162,6 @@ impl JigsawCreator {
       index = 255;
     }
 
-    if index == 5 || index == 255 { return 0; }
-
     let mut v = [
       26.0 - dot(pos, self.n[0]),
       26.0 - dot(pos, self.n[1]),

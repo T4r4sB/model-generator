@@ -107,7 +107,7 @@ impl Tower4Creator {
   }
 
   pub fn get_quality() -> usize {
-    384
+    128
   }
 
   pub fn get_size() -> f32 {
@@ -137,8 +137,6 @@ impl Tower4Creator {
       }
       return 63;
     }
-
-    return 0; //tmp
 
     let mut depth_to_face = f32::INFINITY;
     let sticker_gap = 0.5;

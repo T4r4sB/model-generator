@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 
-mod brake_tool_creator;
-type PartCreator = brake_tool_creator::BrakeToolCreator;
+mod chaingear_creator;
+type PartCreator = chaingear_creator::ChaingearCreator;
 
 pub struct ImgBuffer {
   v: Vec<u8>,
