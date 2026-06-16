@@ -1,12 +1,12 @@
 use crate::points2d::*;
+use dxf::Drawing;
 use dxf::entities::*;
 use dxf::objects::*;
-use dxf::Drawing;
 use fxhash::FxHashMap;
 use std::collections::HashMap;
 
 pub type PartIndex = u32;
-const BAD_INDEX: PartIndex = 0xFFFFFFFF;
+pub const BAD_INDEX: PartIndex = 0xFFFFFFFF;
 
 #[derive(Debug, Clone)]
 pub struct Contour {
@@ -532,8 +532,8 @@ impl ConnectedPart {
     for c in &self.contours {
       let mut prev = c.points[c.points.len() - 1];
       for &p in &c.points {
-        triangles.push(crate::model::Triangle(prev * 2, p * 2, p * 2 + 1));
-        triangles.push(crate::model::Triangle(prev * 2, p * 2 + 1, prev * 2 + 1));
+        triangles.push([prev * 2, p * 2, p * 2 + 1]);
+        triangles.push([prev * 2, p * 2 + 1, prev * 2 + 1]);
         prev = p;
       }
     }
@@ -541,16 +541,12 @@ impl ConnectedPart {
     for t in self.clone().split_to_triangles(points) {
       for c in t.contours {
         assert!(c.points.len() == 3);
-        triangles.push(crate::model::Triangle(c.points[2] * 2, c.points[1] * 2, c.points[0] * 2));
-        triangles.push(crate::model::Triangle(
-          c.points[0] * 2 + 1,
-          c.points[1] * 2 + 1,
-          c.points[2] * 2 + 1,
-        ));
+        triangles.push([c.points[2] * 2, c.points[1] * 2, c.points[0] * 2]);
+        triangles.push([c.points[0] * 2 + 1, c.points[1] * 2 + 1, c.points[2] * 2 + 1]);
       }
     }
 
-    crate::model::Model { vertices: points_3d, triangles, free_vertices: Vec::new() }
+    crate::model::Model { vertices: points_3d, triangles }
   }
 
   pub fn get_square(&self, points: &[Point]) -> f32 {

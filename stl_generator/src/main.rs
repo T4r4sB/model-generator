@@ -2,6 +2,7 @@
 
 use std::num::NonZeroU32;
 use std::ops::Deref;
+use std::time::Duration;
 
 use common::common_for_twisty_puzzles::*;
 use common::contour::*;
@@ -11,6 +12,9 @@ use common::points2d;
 use common::points2d::AABB;
 use common::points3d::*;
 use common::solid::*;
+use fxhash::FxHashMap;
+
+use common::solid::PartIndex;
 
 mod gl_utils;
 mod gl_window;
@@ -19,15 +23,24 @@ mod resources;
 #[macro_use]
 mod errors;
 
-mod crazy_diamond_cube_creator;
-type PartCreator = crazy_diamond_cube_creator::CubeCreator;
+//mod confusing_creator;
+//type PartCreator = confusing_creator::ConfusingCreator;
 
 //mod railroad_creator;
 //type PartCreator = railroad_creator::RailroadCreator;
 
-fn main() {
+mod sphere_creator;
+type PartCreator = sphere_creator::SphereCreator;
+
+fn generate_models() -> FxHashMap<PartIndex, Model> {
   let part_creator = PartCreator::new();
-  let part_func = &|p| part_creator.get_part_index(p);
+  let mut pf_timer = std::cell::RefCell::new(Duration::ZERO);
+  let part_func = &|p| {
+    let start = std::time::Instant::now();
+    let result = part_creator.get_part_index(p);
+    *pf_timer.borrow_mut() += std::time::Instant::now() - start;
+    result
+  };
 
   let start = std::time::Instant::now();
   let mut cc = ContourCreator::new(points2d::AABB::around_zero(100.0), 0.15, 20);
@@ -116,6 +129,7 @@ fn main() {
     mc.fill_next_layer(part_func);
   }
   println!();
+  println!("got {} points {} edges", mc.got_points(), mc.got_edges());
 
   let end_layers = std::time::Instant::now();
 
@@ -143,7 +157,7 @@ fn main() {
         print!("\rmake model {m_index} smooth, progress [{i}/{smooth_cnt}]");
       }
     }
-    if quality > 300 {
+    if quality > 0 {
       println!("tcount before = {}", m.triangles.len());
       m.optimize(width, 0.999, 10, 0.99);
       println!("tcount after {}", m.triangles.len());
@@ -186,18 +200,40 @@ fn main() {
     sum_volumes * 7.850 * 0.001
   );
 
-  println!("layers time: {:?}, opt time: {:?}", end_layers - start, end_opt - end_layers);
+  println!(
+    "layers time: {:?}, opt time: {:?}, pf time: {:?}",
+    end_layers - start,
+    end_opt - end_layers,
+    *pf_timer.borrow()
+  );
 
   weights.sort_by(|(_, w1), (_, w2)| w1.partial_cmp(w2).unwrap());
   for (i, w) in weights {
     println!("{i}\t{w}");
   }
+  models
+}
 
-  println!("models written to big buffer");
+fn main() {
+  //let mut models = generate_models();
+
+
+  let mut test = Model::cone(500, 500, 1.0);
+
+
+  println!("b test={}v, {}t", test.vertices.len(), test.triangles.len());
+  test.optimize(0.01, 0.99999, 1, 0.9999);
+  test.delete_unused_v();
+  println!("a test={}v, {}t", test.vertices.len(), test.triangles.len());
+  test.save_to_stl(&std::path::PathBuf::new().join("output").join("test.stl"));
+
+  let mut models = FxHashMap::<PartIndex, Model>::default();
+  models.insert(1, test);
 
   if let Err(_) = crate::gl_window::run(
     "ОКНО С ПРИКОЛАМИ",
     &mut models.iter().map(|(m_index, m)| {
+      println!("model {m_index} has {} vertices", m.vertices.len());
       let color = match m_index / 10000 {
         1 => 0x00FF00,
         2 => 0xFF2000,
@@ -207,7 +243,7 @@ fn main() {
         6 => 0xFFFF00,
         7 => 0xFF00FF,
         8 => 0xFF80FF,
-        _ => (m_index + 1).wrapping_mul(0x274381) as u32 | 0x404040,
+        _ => (m_index + 1).wrapping_mul(0x274381) as u32 | 0x808080,
       };
       (color, m)
     }),

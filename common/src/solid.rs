@@ -178,6 +178,8 @@ impl SolidLayer {
 pub struct ModelCreator {
   size: usize,
   solid_size: f32,
+  got_points: usize,
+  got_edges: usize,
   models: FxHashMap<PartIndex, Model>,
   prev_layer: SolidLayer,
   cur_layer: SolidLayer,
@@ -200,6 +202,8 @@ impl ModelCreator {
     let mut result = Self {
       size,
       solid_size,
+      got_points: 0,
+      got_edges: 0,
       models: FxHashMap::default(),
       prev_layer: SolidLayer::default(),
       cur_layer: SolidLayer::default(),
@@ -215,6 +219,14 @@ impl ModelCreator {
     result.next_layer = result.filled_layer(0, true, part_f);
 
     result
+  }
+
+  pub fn got_points(&self) -> usize {
+    self.got_points
+  }
+
+  pub fn got_edges(&self) -> usize {
+    self.got_edges
   }
 
   pub fn get_models(self) -> FxHashMap<PartIndex, Model> {
@@ -325,7 +337,7 @@ impl ModelCreator {
     };
 
     let add_t = |model: &mut Model, v0: u32, v1: u32, v2: u32| {
-      model.triangles.push(Triangle(v0, v1, v2));
+      model.triangles.push([v0, v1, v2]);
     };
 
     let it = |model: &mut Model,
@@ -650,6 +662,7 @@ impl ModelCreator {
 
     for y in 0..self.size - 1 {
       for x in 0..self.size - 1 {
+        self.got_points += 1;
         let c = y * self.size + x;
         let cx = c + 1;
         let cy = c + self.size;
@@ -667,6 +680,20 @@ impl ModelCreator {
         let h2next = h1next + 1;
 
         let corner_index = pl[npc].index;
+
+        self.got_edges += (corner_index != cl[c].index) as usize
+          + (corner_index != cl[cx].index    ) as usize
+          + (corner_index != cl[cy].index    ) as usize
+          + (corner_index != cl[cxy].index   ) as usize
+          + (corner_index != nl[npc].index   ) as usize
+          + (corner_index != cl[h1cur].index ) as usize
+          + (corner_index != cl[h2cur].index ) as usize
+          + (corner_index != cl[v1cur].index ) as usize
+          + (corner_index != cl[v2cur].index ) as usize
+          + (corner_index != nl[h1next].index) as usize
+          + (corner_index != nl[h2next].index) as usize
+          + (corner_index != nl[v1next].index) as usize
+          + (corner_index != nl[v2next].index) as usize;
 
         if corner_index != cl[c].index
           || corner_index != cl[cx].index
