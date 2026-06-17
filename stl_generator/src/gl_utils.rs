@@ -2,7 +2,7 @@ use winapi::shared::windef::*;
 use winapi::um::errhandlingapi::*;
 use winapi::um::libloaderapi::*;
 use winapi::um::wingdi::*;
-use winapi::um::winuser::GetClientRect;
+use winapi::um::winuser::*;
 
 use crate::errors::*;
 use crate::resources::*;
@@ -107,7 +107,8 @@ void main() {
         color.y = fract(color.y + 0.5);
         color.z = fract(color.z + 0.5);
     }*/
-    color = color * (-normal.z);
+    float n_factor = 1.0 + (normal.z - 1.0) * 0.3;
+    color = color * n_factor;
     color = white + (color - white) * factor;
     gl_FragColor = vec4(color, 1.0);
 }
@@ -121,7 +122,6 @@ pub struct InputState {
   pub right: bool,
   pub up: bool,
   pub down: bool,
-  pub lbutton: bool,
   pub rbutton: bool,
   pub prev_position: (i32, i32),
 }
@@ -315,7 +315,7 @@ pub fn init_gl(hwnd: HWND, models: &mut dyn Iterator<Item = (u32, &Model)>) -> A
     let mut camera_position = CameraPosition::default();
     camera_position.position.z = 190.0;
 
-    let mut rect = RECT{ left: 0, top: 0, right: 100, bottom: 100 };
+    let mut rect = RECT { left: 0, top: 0, right: 100, bottom: 100 };
     run_api!(GetClientRect(hwnd, &mut rect))?;
     let aspect = (rect.right - rect.left) as f32 / std::cmp::max(1, rect.bottom - rect.top) as f32;
 
@@ -360,8 +360,20 @@ pub fn gl_update_and_draw(context: &mut crate::gl_window::Context) {
     let current_time = std::time::Instant::now();
     let dt = (current_time - gl_data.prev_time).as_secs_f32();
     gl_data.prev_time = current_time;
-
     let delta = dt * 100.0;
+
+    if gl_data.input_state.rbutton {
+      let mut cursor = POINT { x: 0, y: 0 };
+      GetPhysicalCursorPos(&mut cursor);
+      let cursor_delta = (
+        cursor.x - gl_data.input_state.prev_position.0,
+        cursor.y - gl_data.input_state.prev_position.1,
+      );
+
+      gl_data.camera_position.anglez += cursor_delta.0 as f32 * 0.001;
+      gl_data.camera_position.anglex -= cursor_delta.1 as f32 * 0.001;
+      gl_data.input_state.prev_position = (cursor.x, cursor.y);
+    }
 
     if gl_data.input_state.forward {
       gl_data.camera_position.position += Point {

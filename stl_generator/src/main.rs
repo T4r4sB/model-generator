@@ -23,14 +23,14 @@ mod resources;
 #[macro_use]
 mod errors;
 
-//mod confusing_creator;
-//type PartCreator = confusing_creator::ConfusingCreator;
+mod confusing_creator;
+type PartCreator = confusing_creator::ConfusingCreator;
 
 //mod railroad_creator;
 //type PartCreator = railroad_creator::RailroadCreator;
 
-mod sphere_creator;
-type PartCreator = sphere_creator::SphereCreator;
+//mod sphere_creator;
+//type PartCreator = sphere_creator::SphereCreator;
 
 fn generate_models() -> FxHashMap<PartIndex, Model> {
   let part_creator = PartCreator::new();
@@ -135,20 +135,19 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
 
   let mut max_v = 0;
   let mut sum_v = 0;
-
   let mut max_v_after = 0;
   let mut sum_v_after = 0;
-
   let mut models = mc.get_models();
-
   let mut sum_volumes = 0.0;
-
   let mut weights = Vec::new();
+  let mut groups_of_models = FxHashMap::<u32, Model>::default();
+  let mut sum_t_before = 0;
+  let mut sum_t_after = 0;
 
   for (&m_index, m) in &mut models {
     sum_v += m.vertices.len();
     max_v = std::cmp::max(max_v, m.vertices.len());
-    //  m.validate_and_delete_small_groups();
+    m.validate_and_delete_small_groups();
     let smooth_cnt = quality / 50;
     if smooth_cnt > 0 {
       println!();
@@ -157,11 +156,13 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
         print!("\rmake model {m_index} smooth, progress [{i}/{smooth_cnt}]");
       }
     }
+    sum_t_before += m.triangles.len();
     if quality > 0 {
       println!("tcount before = {}", m.triangles.len());
-      m.optimize(width, 0.999, 10, 0.99);
+      m.optimize(width, 0.5, 1000, 0.99);
       println!("tcount after {}", m.triangles.len());
     }
+    sum_t_after += m.triangles.len();
     m.delete_unused_v();
 
     let volume = m.get_volume();
@@ -188,6 +189,8 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
     }
   }
 
+  // models = groups_of_models;
+
   let end_opt = std::time::Instant::now();
 
   println!(
@@ -198,6 +201,11 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
     max_v_after,
     sum_volumes,
     sum_volumes * 7.850 * 0.001
+  );
+
+  println!(
+    "model compression {sum_t_before} to {sum_t_after}: {} times",
+    sum_t_before as f32 / sum_t_after as f32
   );
 
   println!(
@@ -215,20 +223,13 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
 }
 
 fn main() {
-  //let mut models = generate_models();
-
-
-  let mut test = Model::cone(500, 500, 1.0);
-
-
-  println!("b test={}v, {}t", test.vertices.len(), test.triangles.len());
-  test.optimize(0.01, 0.99999, 1, 0.9999);
-  test.delete_unused_v();
-  println!("a test={}v, {}t", test.vertices.len(), test.triangles.len());
-  test.save_to_stl(&std::path::PathBuf::new().join("output").join("test.stl"));
-
+  let mut models = generate_models();
+  /*
+  let mut model = Model::cuboid(500, 500, 500, 0.1);
+  model.optimize(0.0, 0.9999, 1, 0.0);
+  println!("{} triangles", model.triangles.len());
   let mut models = FxHashMap::<PartIndex, Model>::default();
-  models.insert(1, test);
+  models.insert(1, model);*/
 
   if let Err(_) = crate::gl_window::run(
     "ОКНО С ПРИКОЛАМИ",

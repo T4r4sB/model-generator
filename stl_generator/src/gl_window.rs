@@ -1,4 +1,4 @@
-use winapi::shared::minwindef::*;
+     use winapi::shared::minwindef::*;
 use winapi::shared::windef::*;
 use winapi::um::errhandlingapi::*;
 use winapi::um::libloaderapi::*;
@@ -87,23 +87,6 @@ unsafe fn maybe_window_proc(
       if let Some(gl_data) = &mut get_context()?.gl_data {
         ReleaseCapture();
         gl_data.input_state.rbutton = false;
-      }
-    }
-    WM_MOUSEMOVE => {
-      if let Some(gl_data) = &mut get_context()?.gl_data {
-        if gl_data.input_state.rbutton {
-          let mut cursor = POINT { x: 0, y: 0 };
-          GetPhysicalCursorPos(&mut cursor);
-          let delta = (
-            cursor.x - gl_data.input_state.prev_position.0,
-            cursor.y - gl_data.input_state.prev_position.1,
-          );
-
-          gl_data.camera_position.anglez += delta.0 as f32 * 0.001;
-          gl_data.camera_position.anglex -= delta.1 as f32 * 0.001;
-
-          gl_data.input_state.prev_position = (cursor.x, cursor.y);
-        }
       }
     }
     WM_SIZE => {

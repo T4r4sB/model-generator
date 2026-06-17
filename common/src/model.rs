@@ -23,9 +23,15 @@ struct VecNextInfo {
 
 type MeshTopology = Vec<[u32; 3]>;
 
+#[derive(Debug, Default, Copy, Clone)]
+struct NormalWithTol {
+  normal: Point,
+  tol: f32,
+}
+
 struct NormalGroups {
   group_of_t: Vec<u32>,
-  normal_of_g: Vec<Point>,
+  normal_of_g: Vec<NormalWithTol>,
 }
 
 type ChangeTriangleBuffer = Vec<(u32, Triangle)>;
@@ -106,7 +112,7 @@ impl Model {
     }
   }
 
-  pub fn get_topology(&self) -> MeshTopology {
+  fn get_topology(&self) -> MeshTopology {
     let mut edge_to_face = FxHashMap::<(u32, u32), (u32, u32)>::default();
     const BAD_INDEX: u32 = u32::MAX;
     let mut make_edge = |t, v1, v2| {
@@ -160,50 +166,76 @@ impl Model {
     min_group_size: u32,
   ) -> NormalGroups {
     let mut group_of_t = Vec::<u32>::new();
-    let mut normal_of_g = Vec::<Point>::new();
+    let mut valid_group_mapping = Vec::<u32>::new();
+    let mut normal_of_g = Vec::<NormalWithTol>::new();
     group_of_t.resize(self.triangles.len(), u32::MAX);
 
-    let mut group_counts = Vec::<u32>::new();
+    let mut count_of_g = Vec::<u32>::new();
     let top = self.get_topology();
 
-    for ti in 0..self.triangles.len() {
-      if group_of_t[ti] != u32::MAX {
-        continue;
-      }
+    let mut tol = 0.99999;
 
-      let cn = self.get_normal(self.triangles[ti]);
-      let mut stack = Vec::<u32>::new();
-      stack.push(ti as u32);
-      let mut g = group_counts.len();
-      let mut has_group = false;
-      while let Some(cur_ti) = stack.pop() {
-        for new_ti in top[cur_ti as usize] {
-          if group_of_t[new_ti as usize] != u32::MAX {
-            continue;
-          }
+    loop {
+      for ti in 0..self.triangles.len() {
+        if group_of_t[ti] != u32::MAX {
+          continue;
+        }
 
-          let nn = self.get_normal(self.triangles[new_ti as usize]);
-          if dot(nn, cn) <= group_dot {
-            continue;
-          }
-          if !has_group {
-            normal_of_g.push(cn);
-            group_counts.push(1);
-            group_of_t[ti] = g as u32;
-            has_group = true;
-          }
+        let cn = self.get_normal(self.triangles[ti]);
+        let mut stack = Vec::<u32>::new();
+        stack.push(ti as u32);
+        let mut g = count_of_g.len();
+        normal_of_g.push(NormalWithTol { normal: cn, tol });
+        count_of_g.push(1);
+        group_of_t[ti] = g as u32;
+        while let Some(cur_ti) = stack.pop() {
+          for new_ti in top[cur_ti as usize] {
+            if group_of_t[new_ti as usize] != u32::MAX {
+              continue;
+            }
 
-          group_of_t[new_ti as usize] = g as u32;
-          group_counts[g] += 1;
-          stack.push(new_ti);
+            let nn = self.get_normal(self.triangles[new_ti as usize]);
+            if dot(nn, cn) <= tol {
+              continue;
+            }
+
+            group_of_t[new_ti as usize] = g as u32;
+            count_of_g[g] += 1;
+            stack.push(new_ti);
+          }
         }
       }
-    }
 
-    for i in 0..group_of_t.len() {
-      if group_of_t[i] != u32::MAX && group_counts[group_of_t[i] as usize] < min_group_size {
-        group_of_t[i] = u32::MAX;
+      tol -= 1.0 - tol;
+      if tol < group_dot {
+        break;
       }
+
+      let mut complete = true;
+      valid_group_mapping.clear();
+      let mut valid_group_count = 0;
+      for i in 0..count_of_g.len() {
+        if count_of_g[i] < min_group_size {
+          valid_group_mapping.push(u32::MAX);
+          complete = false;
+        } else {
+          valid_group_mapping.push(valid_group_count as u32);
+          count_of_g[valid_group_count] = count_of_g[i];
+          normal_of_g[valid_group_count] = normal_of_g[i];
+          valid_group_count += 1;
+        }
+      }
+
+      if complete {
+        break;
+      }
+
+      for i in 0..group_of_t.len() {
+        group_of_t[i] = valid_group_mapping[group_of_t[i] as usize];
+      }
+
+      count_of_g.truncate(valid_group_count);
+      normal_of_g.truncate(valid_group_count);
     }
 
     NormalGroups { group_of_t, normal_of_g }
@@ -258,10 +290,13 @@ impl Model {
       let dst: &mut [u32; 3] = &mut top[t1 as usize];
       if dst[0] == what {
         dst[0] = t2;
+        assert!(dst[1] != t2 && dst[2] != t2);
       } else if dst[1] == what {
         dst[1] = t2;
+        assert!(dst[0] != t2 && dst[2] != t2);
       } else if dst[2] == what {
         dst[2] = t2;
+        assert!(dst[0] != t2 && dst[1] != t2);
       } else {
         panic!("Failed to exhange {what} to {t2} for {dst:?}!");
       }
@@ -310,6 +345,11 @@ impl Model {
         }
       }
 
+      let mut nt = self.triangles[cur as usize];
+      if nt[(nv + 1) % 3] == vto {
+        return false;
+      }
+
       if cur != tleft {
         if nl && groups.group_of_t[cur as usize] != gleft {
           nl = false;
@@ -318,18 +358,23 @@ impl Model {
           return false;
         }
 
-        let mut nt = self.triangles[cur as usize];
         assert!(nt[nv] == vfrom, "Wrong vertex {vfrom} to squash triangle {nt:?} by index {nv}!");
         nt[nv] = vto;
         let nn = self.get_perp(nt);
         let nnl = nn.len();
 
         if nl {
-          if gleft != u32::MAX && dot(groups.normal_of_g[gleft as usize], nn) <= group_dot * nnl {
+          if gleft != u32::MAX
+            && dot(groups.normal_of_g[gleft as usize].normal, nn)
+              <= groups.normal_of_g[gleft as usize].tol * nnl
+          {
             return false;
           }
         } else {
-          if gright != u32::MAX && dot(groups.normal_of_g[gright as usize], nn) <= group_dot * nnl {
+          if gright != u32::MAX
+            && dot(groups.normal_of_g[gright as usize].normal, nn)
+              <= groups.normal_of_g[gright as usize].tol * nnl
+          {
             return false;
           }
         }
@@ -362,6 +407,7 @@ impl Model {
       }
     }
 
+    // Here we know we should squash
     for (tleft, tright) in [(tleft, tright), (tright, tleft)] {
       let fa = top[tleft as usize];
       if fa[0] == tright {
@@ -397,6 +443,10 @@ impl Model {
       ti.push(t);
     }
     let mut ttc = self.triangles.len();
+
+    //self.print_nbh(&top, &groups, 15, 13);
+    //panic!("look");
+
     loop {
       println!("start loop iter with {ttc} valid triangles");
       let mut squashed = false;
@@ -524,7 +574,7 @@ impl Model {
     self.triangles = new_t;
   }
 
-  pub fn split_by(self, t_to_i: &dyn Fn(u32) -> u32) -> Vec<Model> {
+  fn split_by(self, t_to_i: &dyn Fn(u32) -> u32) -> Vec<Model> {
     #[derive(Default)]
     struct Mapping {
       v: FxHashMap<u32, u32>, // vertex_id -> new_vertex_id
@@ -556,6 +606,12 @@ impl Model {
     }
 
     mappings.into_iter().map(|(_, m)| m.m).collect()
+  }
+
+  pub fn split_by_normal(self, group_dot: f32, min_group_size: u32) -> Vec<Model> {
+    let top = self.get_topology();
+    let ng = self.get_normal_groups(&top, group_dot, min_group_size);
+    self.split_by(&|i| ng.group_of_t[i as usize].wrapping_add(1))
   }
 
   pub fn center(&self) -> Point {
