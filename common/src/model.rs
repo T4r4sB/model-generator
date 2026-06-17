@@ -168,6 +168,10 @@ impl Model {
     let mut group_of_t = Vec::<u32>::new();
     let mut valid_group_mapping = Vec::<u32>::new();
     let mut normal_of_g = Vec::<NormalWithTol>::new();
+    let mut stack = Vec::<u32>::new();
+    let mut visited = Vec::<u32>::new();
+    let mut visited_ng = Vec::<u32>::new();
+
     group_of_t.resize(self.triangles.len(), u32::MAX);
 
     let mut count_of_g = Vec::<u32>::new();
@@ -176,17 +180,27 @@ impl Model {
     let mut tol = 0.99999;
 
     loop {
+      let next_tol = tol - (1.0 - tol);
+      let last_iter = next_tol < group_dot;
+      let mut complete = true;
       for ti in 0..self.triangles.len() {
         if group_of_t[ti] != u32::MAX {
           continue;
         }
 
         let cn = self.get_normal(self.triangles[ti]);
-        let mut stack = Vec::<u32>::new();
+        if cn.x.is_nan() || cn.y.is_nan() || cn.z.is_nan() {
+          continue;
+        }
+
+        let mut count = 1;
+        let mut nt = NormalWithTol { normal: cn, tol };
+
+        stack.clear();
         stack.push(ti as u32);
+        visited.push(ti as u32);
+
         let mut g = count_of_g.len();
-        normal_of_g.push(NormalWithTol { normal: cn, tol });
-        count_of_g.push(1);
         group_of_t[ti] = g as u32;
         while let Some(cur_ti) = stack.pop() {
           for new_ti in top[cur_ti as usize] {
@@ -199,45 +213,32 @@ impl Model {
               continue;
             }
 
+            count += 1;
             group_of_t[new_ti as usize] = g as u32;
-            count_of_g[g] += 1;
+            visited.push(new_ti);
             stack.push(new_ti);
           }
         }
-      }
 
-      tol -= 1.0 - tol;
-      if tol < group_dot {
-        break;
-      }
-
-      let mut complete = true;
-      valid_group_mapping.clear();
-      let mut valid_group_count = 0;
-      for i in 0..count_of_g.len() {
-        if count_of_g[i] < min_group_size {
-          valid_group_mapping.push(u32::MAX);
-          complete = false;
+        if last_iter || count >= min_group_size {
+          count_of_g.push(count);
+          normal_of_g.push(nt);
+          visited.clear();
         } else {
-          valid_group_mapping.push(valid_group_count as u32);
-          count_of_g[valid_group_count] = count_of_g[i];
-          normal_of_g[valid_group_count] = normal_of_g[i];
-          valid_group_count += 1;
+          complete = false;
+          visited_ng.append(&mut visited);
         }
       }
 
       if complete {
         break;
       }
-
-      for i in 0..group_of_t.len() {
-        group_of_t[i] = valid_group_mapping[group_of_t[i] as usize];
+      tol = next_tol;
+      for &ti in &visited_ng {
+        group_of_t[ti as usize] = u32::MAX;
       }
-
-      count_of_g.truncate(valid_group_count);
-      normal_of_g.truncate(valid_group_count);
+      visited_ng.clear();
     }
-
     NormalGroups { group_of_t, normal_of_g }
   }
 
@@ -311,7 +312,6 @@ impl Model {
     tright: u32,
     vfrom: u32,
     vto: u32,
-    group_dot: f32,
     buf: &mut ChangeTriangleBuffer,
   ) -> bool {
     buf.clear();
@@ -363,20 +363,9 @@ impl Model {
         let nn = self.get_perp(nt);
         let nnl = nn.len();
 
-        if nl {
-          if gleft != u32::MAX
-            && dot(groups.normal_of_g[gleft as usize].normal, nn)
-              <= groups.normal_of_g[gleft as usize].tol * nnl
-          {
-            return false;
-          }
-        } else {
-          if gright != u32::MAX
-            && dot(groups.normal_of_g[gright as usize].normal, nn)
-              <= groups.normal_of_g[gright as usize].tol * nnl
-          {
-            return false;
-          }
+        let g = groups.normal_of_g[if nl { gleft } else { gright } as usize];
+        if dot(g.normal, nn) <= g.tol * nnl {
+          return false;
         }
 
         buf.push((cur, nt));
@@ -460,7 +449,7 @@ impl Model {
           let ta = top[t][i];
           let vfrom = tr[(i + 1) % 3];
           let vto = tr[i];
-          if self.squash(&mut top, &groups, t as u32, ta, vfrom, vto, group_dot, &mut buf) {
+          if self.squash(&mut top, &groups, t as u32, ta, vfrom, vto, &mut buf) {
             ttc -= 2;
             squashed = true;
             continue 'enumerate_triangles;
