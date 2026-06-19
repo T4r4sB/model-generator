@@ -34,7 +34,24 @@ struct NormalGroups {
   normal_of_g: Vec<NormalWithTol>,
 }
 
+const RSQ3: f32 = 0.57735026918962576;
+
+const REPER_VECTORS: [Point; 7] = [
+  Point { x: 1.0, y: 0.0, z: 0.0 },
+  Point { x: 0.0, y: 1.0, z: 0.0 },
+  Point { x: 0.0, y: 0.0, z: 1.0 },
+  Point { x: -RSQ3, y: -RSQ3, z: RSQ3 },
+  Point { x: -RSQ3, y: RSQ3, z: RSQ3 },
+  Point { x: RSQ3, y: -RSQ3, z: RSQ3 },
+  Point { x: RSQ3, y: RSQ3, z: RSQ3 },
+];
+
 type ChangeTriangleBuffer = Vec<(u32, Triangle)>;
+struct SquashContext {
+  top: MeshTopology,
+  ng: NormalGroups,
+  buf: ChangeTriangleBuffer,
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct ArrayBuffer {
@@ -163,65 +180,110 @@ impl Model {
     &self,
     top: &MeshTopology,
     group_dot: f32,
-    min_group_size: u32,
+    min_group_size: f32,
   ) -> NormalGroups {
+    struct GroupInfo {
+      extremal: [(f32, f32); REPER_VECTORS.len()],
+    }
+
+    impl GroupInfo {
+      fn new() -> Self {
+        Self { extremal: [(f32::INFINITY, -f32::INFINITY); REPER_VECTORS.len()] }
+      }
+
+      fn add_v(&mut self, p: Point) {
+        for i in 0..REPER_VECTORS.len() {
+          let dst = &mut self.extremal[i];
+          let d = dot(p, REPER_VECTORS[i]);
+          dst.0 = f32::min(dst.0, d);
+          dst.1 = f32::max(dst.1, d);
+        }
+      }
+
+      fn add_t(&mut self, model: &Model, ti: usize) {
+        let t = model.triangles[ti];
+        self.add_v(model.vertices[t[0] as usize]);
+        self.add_v(model.vertices[t[1] as usize]);
+        self.add_v(model.vertices[t[2] as usize]);
+      }
+
+      fn strength(&self) -> f32 {
+        let mut result = -f32::INFINITY;
+        for e in &self.extremal {
+          result = f32::max(result, e.1 - e.0);
+        }
+        result
+      }
+    }
+
     let mut group_of_t = Vec::<u32>::new();
     let mut valid_group_mapping = Vec::<u32>::new();
     let mut normal_of_g = Vec::<NormalWithTol>::new();
     let mut stack = Vec::<u32>::new();
     let mut visited = Vec::<u32>::new();
     let mut visited_ng = Vec::<u32>::new();
+    let mut info_of_g = Vec::<GroupInfo>::new();
 
     group_of_t.resize(self.triangles.len(), u32::MAX);
 
-    let mut count_of_g = Vec::<u32>::new();
-    let top = self.get_topology();
-
     let mut tol = 0.99999;
 
+    let mut ti = Vec::with_capacity(self.triangles.len());
+    for i in 0..self.triangles.len() {
+      ti.push(i);
+    }
+    ti.shuffle(&mut rand::rngs::StdRng::seed_from_u64(10938109));
+
     loop {
+      println!("get_normal_groups with tol {tol}...");
       let next_tol = tol - (1.0 - tol);
       let last_iter = next_tol < group_dot;
       let mut complete = true;
-      for ti in 0..self.triangles.len() {
+
+      for &ti in &ti {
         if group_of_t[ti] != u32::MAX {
           continue;
         }
 
-        let cn = self.get_normal(self.triangles[ti]);
-        if cn.x.is_nan() || cn.y.is_nan() || cn.z.is_nan() {
+        let cn = self.get_perp(self.triangles[ti]);
+        let cnl = cn.len();
+        if cnl == 0.0 {
           continue;
         }
+        let cn = cn.scale(cnl.recip());
 
-        let mut count = 1;
+        let mut ig = GroupInfo::new();
+        ig.add_t(self, ti);
         let mut nt = NormalWithTol { normal: cn, tol };
 
         stack.clear();
         stack.push(ti as u32);
         visited.push(ti as u32);
 
-        let mut g = count_of_g.len();
+        let mut g = info_of_g.len();
         group_of_t[ti] = g as u32;
         while let Some(cur_ti) = stack.pop() {
           for new_ti in top[cur_ti as usize] {
-            if group_of_t[new_ti as usize] != u32::MAX {
+            let g_ti = group_of_t[new_ti as usize];
+            if g_ti != u32::MAX {
               continue;
             }
 
-            let nn = self.get_normal(self.triangles[new_ti as usize]);
-            if dot(nn, cn) <= tol {
+            let nn = self.get_perp(self.triangles[new_ti as usize]);
+            let ln = nn.len();
+            if dot(nn, cn) < tol * ln {
               continue;
             }
 
-            count += 1;
+            ig.add_t(self, new_ti as usize);
             group_of_t[new_ti as usize] = g as u32;
             visited.push(new_ti);
             stack.push(new_ti);
           }
         }
 
-        if last_iter || count >= min_group_size {
-          count_of_g.push(count);
+        if ig.strength() >= min_group_size || last_iter {
+          info_of_g.push(ig);
           normal_of_g.push(nt);
           visited.clear();
         } else {
@@ -230,14 +292,19 @@ impl Model {
         }
       }
 
-      if complete {
+      if last_iter {
         break;
       }
+
       tol = next_tol;
       for &ti in &visited_ng {
         group_of_t[ti as usize] = u32::MAX;
       }
       visited_ng.clear();
+
+      if complete {
+        break;
+      }
     }
     NormalGroups { group_of_t, normal_of_g }
   }
@@ -286,89 +353,88 @@ impl Model {
     v0.sqr_len() < eps * eps || v1.sqr_len() < eps * eps || v2.sqr_len() < eps * eps
   }
 
+  fn find_t(adj: [u32; 3], ti: u32) -> (usize, usize, usize) {
+    if adj[0] == ti {
+      return (0, 1, 2);
+    } else if adj[1] == ti {
+      return (1, 2, 0);
+    } else if adj[2] == ti {
+      return (2, 0, 1);
+    } else {
+      panic!("Cant find ti {ti} in adj {adj:?}!");
+    }
+  }
+
   fn exchange_top(top: &mut MeshTopology, t1: u32, t2: u32, what: u32) {
     for (t1, t2) in [(t1, t2), (t2, t1)] {
       let dst: &mut [u32; 3] = &mut top[t1 as usize];
-      if dst[0] == what {
-        dst[0] = t2;
-        assert!(dst[1] != t2 && dst[2] != t2);
-      } else if dst[1] == what {
-        dst[1] = t2;
-        assert!(dst[0] != t2 && dst[2] != t2);
-      } else if dst[2] == what {
-        dst[2] = t2;
-        assert!(dst[0] != t2 && dst[1] != t2);
-      } else {
-        panic!("Failed to exhange {what} to {t2} for {dst:?}!");
-      }
+      let (d0, d1, d2) = Self::find_t(*dst, what);
+      dst[d0] = t2;
+      assert!(dst[d1] != t2 && dst[d2] != t2);
     }
   }
 
   fn squash(
     &mut self,
-    top: &mut MeshTopology,
-    groups: &NormalGroups,
+    ctx: &mut SquashContext,
     tleft: u32,
     tright: u32,
     vfrom: u32,
     vto: u32,
-    buf: &mut ChangeTriangleBuffer,
   ) -> bool {
-    buf.clear();
+    ctx.buf.clear();
     let mut cur = tleft;
     let mut prev = tright;
     let mut pprev = u32::MAX;
     let mut nl = true;
+    let gleft = ctx.ng.group_of_t[tleft as usize];
+    let gright = ctx.ng.group_of_t[tright as usize];
 
-    let gleft = groups.group_of_t[tleft as usize];
-    let gright = groups.group_of_t[tright as usize];
+    let both_valid = gleft != u32::MAX && gright != u32::MAX;
 
     while cur != tright {
-      let t = &top[cur as usize];
-      let nv = if prev == t[0] {
-        1
-      } else if prev == t[1] {
-        2
-      } else if prev == t[2] {
-        0
-      } else {
-        panic!("Mesh topology is wrong, {prev} is not adj for {cur}!")
-      };
+      let t = ctx.top[cur as usize];
+      let (_ , nv1, nv2) = Self::find_t(t, prev);
 
-      let next = t[nv];
+      let next = t[nv1];
       if cur == tleft || next == tright {
         // prevent to make vertex of 2 edges
-        let check = t[(nv + 1) % 3];
-        let nt = top[next as usize];
+        let check = t[nv2];
+        let nt = ctx.top[next as usize];
         if nt[0] == check || nt[1] == check || nt[2] == check {
           return false;
         }
       }
 
       let mut nt = self.triangles[cur as usize];
-      if nt[(nv + 1) % 3] == vto {
+      if nt[nv2] == vto {
         return false;
       }
 
       if cur != tleft {
-        if nl && groups.group_of_t[cur as usize] != gleft {
-          nl = false;
-        }
-        if !nl && groups.group_of_t[cur as usize] != gright {
-          return false;
+        if both_valid {
+          if nl && ctx.ng.group_of_t[cur as usize] != gleft {
+            nl = false;
+          }
+          if !nl && ctx.ng.group_of_t[cur as usize] != gright {
+            return false;
+          }
         }
 
-        assert!(nt[nv] == vfrom, "Wrong vertex {vfrom} to squash triangle {nt:?} by index {nv}!");
-        nt[nv] = vto;
+        assert!(nt[nv1] == vfrom, "Wrong vertex {vfrom} to squash triangle {nt:?} by index {nv1}!");
+        nt[nv1] = vto;
         let nn = self.get_perp(nt);
         let nnl = nn.len();
 
-        let g = groups.normal_of_g[if nl { gleft } else { gright } as usize];
-        if dot(g.normal, nn) <= g.tol * nnl {
-          return false;
+        let gi = if nl { gleft } else { gright };
+        if gi != u32::MAX {
+          let g: NormalWithTol = ctx.ng.normal_of_g[gi as usize];
+          if dot(g.normal, nn) <= g.tol * nnl {
+            return false;
+          }
         }
 
-        buf.push((cur, nt));
+        ctx.buf.push((cur, nt));
       }
 
       pprev = prev;
@@ -378,8 +444,8 @@ impl Model {
 
     if pprev == tleft {
       // prevent to make vertex of 2 edges
-      let top_left = top[tleft as usize];
-      let top_right = top[tright as usize];
+      let top_left = ctx.top[tleft as usize];
+      let top_right = ctx.top[tright as usize];
       let mut all_t =
         [top_left[0], top_left[1], top_left[2], top_right[0], top_right[1], top_right[2]];
       all_t.sort();
@@ -398,34 +464,28 @@ impl Model {
 
     // Here we know we should squash
     for (tleft, tright) in [(tleft, tright), (tright, tleft)] {
-      let fa = top[tleft as usize];
-      if fa[0] == tright {
-        Self::exchange_top(top, fa[1], fa[2], tleft);
-      } else if fa[1] == tright {
-        Self::exchange_top(top, fa[2], fa[0], tleft);
-      } else if fa[2] == tright {
-        Self::exchange_top(top, fa[0], fa[1], tleft);
-      } else {
-        panic!("Triangle {tright} is not an adj for {tleft}!");
-      }
+      let fa = ctx.top[tleft as usize];
+      let (_, fa1, fa2) = Self::find_t(fa, tright);
+      Self::exchange_top(&mut ctx.top, fa[fa1], fa[fa2], tleft);
     }
 
-    for (index, nt) in buf {
+    for (index, nt) in &ctx.buf {
       self.triangles[*index as usize] = *nt;
     }
 
-    top[tleft as usize][0] = u32::MAX;
-    top[tright as usize][0] = u32::MAX;
+    ctx.top[tleft as usize][0] = u32::MAX;
+    ctx.top[tright as usize][0] = u32::MAX;
 
     true
   }
 
-  pub fn optimize(&mut self, width: f32, group_dot: f32, min_group_size: u32, smooth_dot: f32) {
+  pub fn optimize(&mut self, width: f32, group_dot: f32, min_group_size: f32) {
     println!("get topology...");
-    let mut top = self.get_topology();
+    let top = self.get_topology();
     println!("get normal groups...");
-    let groups = self.get_normal_groups(&top, group_dot, min_group_size);
-    let mut buf = ChangeTriangleBuffer::new();
+    let ng = self.get_normal_groups(&top, group_dot, min_group_size);
+    let buf = ChangeTriangleBuffer::new();
+    let mut ctx = SquashContext { top, ng, buf };
     let mut rng = rand::rngs::StdRng::seed_from_u64(1500);
     let mut ti = Vec::with_capacity(self.triangles.len());
     for t in 0..self.triangles.len() {
@@ -433,23 +493,20 @@ impl Model {
     }
     let mut ttc = self.triangles.len();
 
-    //self.print_nbh(&top, &groups, 15, 13);
-    //panic!("look");
-
     loop {
       println!("start loop iter with {ttc} valid triangles");
       let mut squashed = false;
       ti.shuffle(&mut rng);
       'enumerate_triangles: for &t in &ti {
-        if top[t][0] == u32::MAX {
+        if ctx.top[t][0] == u32::MAX {
           continue;
         }
         let tr = self.triangles[t];
         for i in 0..3 {
-          let ta = top[t][i];
+          let ta = ctx.top[t][i];
           let vfrom = tr[(i + 1) % 3];
           let vto = tr[i];
-          if self.squash(&mut top, &groups, t as u32, ta, vfrom, vto, &mut buf) {
+          if self.squash(&mut ctx, t as u32, ta, vfrom, vto) {
             ttc -= 2;
             squashed = true;
             continue 'enumerate_triangles;
@@ -464,7 +521,7 @@ impl Model {
 
     let mut j = 0;
     for i in 0..self.triangles.len() {
-      if top[i][0] != u32::MAX {
+      if ctx.top[i][0] != u32::MAX {
         self.triangles[j] = self.triangles[i];
         j += 1;
       }
@@ -597,10 +654,10 @@ impl Model {
     mappings.into_iter().map(|(_, m)| m.m).collect()
   }
 
-  pub fn split_by_normal(self, group_dot: f32, min_group_size: u32) -> Vec<Model> {
+  pub fn split_by_normal(self, group_dot: f32, min_group_size: f32) -> Vec<Model> {
     let top = self.get_topology();
     let ng = self.get_normal_groups(&top, group_dot, min_group_size);
-    self.split_by(&|i| ng.group_of_t[i as usize].wrapping_add(1))
+    self.split_by(&|i| ng.group_of_t[i as usize].wrapping_add(2))
   }
 
   pub fn center(&self) -> Point {
