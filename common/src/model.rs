@@ -51,6 +51,8 @@ struct SquashContext {
   top: MeshTopology,
   ng: NormalGroups,
   buf: ChangeTriangleBuffer,
+  ec: Vec<u32>,             // count of edges on each vertex
+  e: FxHashSet<(u32, u32)>, // list of all egdes
 }
 
 #[derive(Debug, Clone, Default)]
@@ -353,6 +355,48 @@ impl Model {
     v0.sqr_len() < eps * eps || v1.sqr_len() < eps * eps || v2.sqr_len() < eps * eps
   }
 
+  fn create_squash_context(
+    &self,
+    top: MeshTopology,
+    ng: NormalGroups,
+    buf: ChangeTriangleBuffer,
+  ) -> SquashContext {
+    let mut ec = Vec::new();
+    ec.resize(self.vertices.len(), 0);
+    let mut e = FxHashSet::default();
+    for &t in &self.triangles {
+      ec[t[0] as usize] += 1;
+      ec[t[1] as usize] += 1;
+      ec[t[2] as usize] += 1;
+      let ins01 = e.insert((t[0], t[1]));
+      let ins12 = e.insert((t[1], t[2]));
+      let ins20 = e.insert((t[2], t[0]));
+      assert!(ins01 && ins12 && ins20, "Topology has dublicated edge!");
+    }
+    SquashContext { top, ng, buf, ec, e }
+  }
+
+  fn check_squash_context(&self, ctx: &SquashContext) {
+    let mut ec = Vec::new();
+    ec.resize(self.vertices.len(), 0);
+    for (ti, t) in self.triangles.iter().enumerate() {
+      if ctx.top[ti][0] == u32::MAX {
+        continue;
+      }
+      ec[t[0] as usize] += 1;
+      ec[t[1] as usize] += 1;
+      ec[t[2] as usize] += 1;
+    }
+    for i in 0..self.vertices.len() {
+      assert!(
+        ctx.ec[i] == ec[i],
+        "Falied to update squash context on {i}, act={}, exp={}",
+        ctx.ec[i],
+        ec[i]
+      );
+    }
+  }
+
   fn find_t(adj: [u32; 3], ti: u32) -> (usize, usize, usize) {
     if adj[0] == ti {
       return (0, 1, 2);
@@ -382,6 +426,20 @@ impl Model {
     vfrom: u32,
     vto: u32,
   ) -> bool {
+    if ctx.ec[vfrom as usize] - 2 + ctx.ec[vto as usize] - 2 < 3 {
+      return false;
+    }
+    let (lt0, lt1, lt2) = Self::find_t(ctx.top[tleft as usize], tright);
+    let vleft = self.triangles[tleft as usize][lt2];
+    if ctx.ec[vleft as usize] - 1 < 3 {
+      return false;
+    }
+    let (rt0, rt1, rt2) = Self::find_t(ctx.top[tright as usize], tleft);
+    let vright = self.triangles[tright as usize][rt2];
+    if ctx.ec[vright as usize] - 1 < 3 {
+      return false;
+    }
+
     ctx.buf.clear();
     let mut cur = tleft;
     let mut prev = tright;
@@ -394,18 +452,9 @@ impl Model {
 
     while cur != tright {
       let t = ctx.top[cur as usize];
-      let (_ , nv1, nv2) = Self::find_t(t, prev);
+      let (_, nv1, nv2) = Self::find_t(t, prev);
 
       let next = t[nv1];
-      if cur == tleft || next == tright {
-        // prevent to make vertex of 2 edges
-        let check = t[nv2];
-        let nt = ctx.top[next as usize];
-        if nt[0] == check || nt[1] == check || nt[2] == check {
-          return false;
-        }
-      }
-
       let mut nt = self.triangles[cur as usize];
       if nt[nv2] == vto {
         return false;
@@ -442,26 +491,6 @@ impl Model {
       cur = next;
     }
 
-    if pprev == tleft {
-      // prevent to make vertex of 2 edges
-      let top_left = ctx.top[tleft as usize];
-      let top_right = ctx.top[tright as usize];
-      let mut all_t =
-        [top_left[0], top_left[1], top_left[2], top_right[0], top_right[1], top_right[2]];
-      all_t.sort();
-      let mut prev = u32::MAX;
-      let mut unique = 0;
-      for &a in &all_t {
-        if a != prev {
-          prev = a;
-          unique += 1;
-        }
-      }
-      if unique <= 4 {
-        return false;
-      }
-    }
-
     // Here we know we should squash
     for (tleft, tright) in [(tleft, tright), (tright, tleft)] {
       let fa = ctx.top[tleft as usize];
@@ -472,6 +501,11 @@ impl Model {
     for (index, nt) in &ctx.buf {
       self.triangles[*index as usize] = *nt;
     }
+
+    ctx.ec[vto as usize] = ctx.ec[vfrom as usize] - 2 + ctx.ec[vto as usize] - 2;
+    ctx.ec[vfrom as usize] = 0;
+    ctx.ec[vleft as usize] -= 1;
+    ctx.ec[vright as usize] -= 1;
 
     ctx.top[tleft as usize][0] = u32::MAX;
     ctx.top[tright as usize][0] = u32::MAX;
@@ -485,7 +519,7 @@ impl Model {
     println!("get normal groups...");
     let ng = self.get_normal_groups(&top, group_dot, min_group_size);
     let buf = ChangeTriangleBuffer::new();
-    let mut ctx = SquashContext { top, ng, buf };
+    let mut ctx = self.create_squash_context(top, ng, buf);
     let mut rng = rand::rngs::StdRng::seed_from_u64(1500);
     let mut ti = Vec::with_capacity(self.triangles.len());
     for t in 0..self.triangles.len() {
