@@ -46,13 +46,41 @@ const REPER_VECTORS: [Point; 7] = [
   Point { x: RSQ3, y: RSQ3, z: RSQ3 },
 ];
 
-type ChangeTriangleBuffer = Vec<(u32, Triangle)>;
-struct SquashContext {
+#[derive(Debug, Default)]
+struct ChangeTriangleBuffer {
+  v: Vec<u32>,
+  t: Vec<(u32, Triangle)>,
+}
+
+struct MergeContext {
   top: MeshTopology,
   ng: NormalGroups,
   buf: ChangeTriangleBuffer,
   ec: Vec<u32>,             // count of edges on each vertex
   e: FxHashSet<(u32, u32)>, // list of all egdes
+}
+
+impl MergeContext {
+  fn ins_edge(e: &mut FxHashSet<(u32, u32)>, v0: u32, v1: u32) {
+    let inserted = if v0 < v1 { e.insert((v0, v1)) } else { e.insert((v1, v0)) };
+    assert!(inserted, "Edge {v0}: {v1} still exists!");
+  }
+
+  fn check_edge(&self, v0: u32, v1: u32) -> bool {
+    if v0 < v1 { self.e.contains(&(v0, v1)) } else { self.e.contains(&(v1, v0)) }
+  }
+
+  fn ins_edge_if_ok(e: &mut FxHashSet<(u32, u32)>, v0: u32, v1: u32) {
+    if v0 < v1 {
+      let inserted = e.insert((v0, v1));
+      assert!(inserted, "Edge {v0}: {v1} still exists!");
+    }
+  }
+
+  fn remove_edge(e: &mut FxHashSet<(u32, u32)>, v0: u32, v1: u32) {
+    let removed = if v0 < v1 { e.remove(&(v0, v1)) } else { e.remove(&(v1, v0)) };
+    assert!(removed, "Edge {v0}: {v1} not exists!");
+  }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -284,7 +312,7 @@ impl Model {
           }
         }
 
-        if ig.strength() >= min_group_size || last_iter {
+        if ig.strength() >= min_group_size || last_iter{
           info_of_g.push(ig);
           normal_of_g.push(nt);
           visited.clear();
@@ -355,30 +383,31 @@ impl Model {
     v0.sqr_len() < eps * eps || v1.sqr_len() < eps * eps || v2.sqr_len() < eps * eps
   }
 
-  fn create_squash_context(
+  fn create_merge_context(
     &self,
     top: MeshTopology,
     ng: NormalGroups,
     buf: ChangeTriangleBuffer,
-  ) -> SquashContext {
+  ) -> MergeContext {
     let mut ec = Vec::new();
     ec.resize(self.vertices.len(), 0);
     let mut e = FxHashSet::default();
+    let mut mc = MergeContext { top, ng, buf, ec, e };
     for &t in &self.triangles {
-      ec[t[0] as usize] += 1;
-      ec[t[1] as usize] += 1;
-      ec[t[2] as usize] += 1;
-      let ins01 = e.insert((t[0], t[1]));
-      let ins12 = e.insert((t[1], t[2]));
-      let ins20 = e.insert((t[2], t[0]));
-      assert!(ins01 && ins12 && ins20, "Topology has dublicated edge!");
+      mc.ec[t[0] as usize] += 1;
+      mc.ec[t[1] as usize] += 1;
+      mc.ec[t[2] as usize] += 1;
+      MergeContext::ins_edge_if_ok(&mut mc.e, t[0], t[1]);
+      MergeContext::ins_edge_if_ok(&mut mc.e, t[1], t[2]);
+      MergeContext::ins_edge_if_ok(&mut mc.e, t[2], t[0]);
     }
-    SquashContext { top, ng, buf, ec, e }
+    mc
   }
 
-  fn check_squash_context(&self, ctx: &SquashContext) {
+  fn check_merge_context(&self, ctx: &MergeContext) {
     let mut ec = Vec::new();
     ec.resize(self.vertices.len(), 0);
+    let mut e = FxHashSet::default();
     for (ti, t) in self.triangles.iter().enumerate() {
       if ctx.top[ti][0] == u32::MAX {
         continue;
@@ -386,14 +415,24 @@ impl Model {
       ec[t[0] as usize] += 1;
       ec[t[1] as usize] += 1;
       ec[t[2] as usize] += 1;
+      let ins01 = if t[0] < t[1] { e.insert((t[0], t[1])) } else { true };
+      let ins12 = if t[1] < t[2] { e.insert((t[1], t[2])) } else { true };
+      let ins20 = if t[2] < t[0] { e.insert((t[2], t[0])) } else { true };
+      assert!(ins01 && ins12 && ins20, "Topology has duplicated edge!");
     }
     for i in 0..self.vertices.len() {
       assert!(
         ctx.ec[i] == ec[i],
-        "Falied to update squash context on {i}, act={}, exp={}",
+        "Falied to update merge context on {i}, act={}, exp={}",
         ctx.ec[i],
         ec[i]
       );
+    }
+    for edge in &e {
+      assert!(ctx.e.contains(edge), "Expected edge {edge:?} not existing in ctx!");
+    }
+    for edge in &ctx.e {
+      assert!(e.contains(edge), "Actual edge {edge:?} not existing in expected set!");
     }
   }
 
@@ -418,9 +457,9 @@ impl Model {
     }
   }
 
-  fn squash(
+  fn merge(
     &mut self,
-    ctx: &mut SquashContext,
+    ctx: &mut MergeContext,
     tleft: u32,
     tright: u32,
     vfrom: u32,
@@ -440,7 +479,8 @@ impl Model {
       return false;
     }
 
-    ctx.buf.clear();
+    ctx.buf.t.clear();
+    ctx.buf.v.clear();
     let mut cur = tleft;
     let mut prev = tright;
     let mut pprev = u32::MAX;
@@ -456,21 +496,24 @@ impl Model {
 
       let next = t[nv1];
       let mut nt = self.triangles[cur as usize];
-      if nt[nv2] == vto {
-        return false;
-      }
+      assert!(nt[nv2] != vto, "Duplicate edge!");
 
       if cur != tleft {
-        if both_valid {
-          if nl && ctx.ng.group_of_t[cur as usize] != gleft {
-            nl = false;
-          }
-          if !nl && ctx.ng.group_of_t[cur as usize] != gright {
+        if next != tright {
+          if ctx.check_edge(nt[nv2], vto) {
             return false;
           }
+          ctx.buf.v.push(nt[nv2]);
         }
 
-        assert!(nt[nv1] == vfrom, "Wrong vertex {vfrom} to squash triangle {nt:?} by index {nv1}!");
+        if nl && ctx.ng.group_of_t[cur as usize] != gleft {
+          nl = false;
+        }
+        if !nl && ctx.ng.group_of_t[cur as usize] != gright {
+          return false;
+        }
+
+        assert!(nt[nv1] == vfrom, "Wrong vertex {vfrom} to merge triangle {nt:?} by index {nv1}!");
         nt[nv1] = vto;
         let nn = self.get_perp(nt);
         let nnl = nn.len();
@@ -483,7 +526,7 @@ impl Model {
           }
         }
 
-        ctx.buf.push((cur, nt));
+        ctx.buf.t.push((cur, nt));
       }
 
       pprev = prev;
@@ -491,15 +534,24 @@ impl Model {
       cur = next;
     }
 
-    // Here we know we should squash
+    // Here we know we should merge
     for (tleft, tright) in [(tleft, tright), (tright, tleft)] {
       let fa = ctx.top[tleft as usize];
       let (_, fa1, fa2) = Self::find_t(fa, tright);
       Self::exchange_top(&mut ctx.top, fa[fa1], fa[fa2], tleft);
     }
 
-    for (index, nt) in &ctx.buf {
+    for (index, nt) in &ctx.buf.t {
       self.triangles[*index as usize] = *nt;
+    }
+
+    for v in [vleft, vright, vto] {
+      MergeContext::remove_edge(&mut ctx.e, v, vfrom);
+    }
+
+    for &v in &ctx.buf.v {
+      MergeContext::remove_edge(&mut ctx.e, v, vfrom);
+      MergeContext::ins_edge(&mut ctx.e, v, vto);
     }
 
     ctx.ec[vto as usize] = ctx.ec[vfrom as usize] - 2 + ctx.ec[vto as usize] - 2;
@@ -518,8 +570,9 @@ impl Model {
     let top = self.get_topology();
     println!("get normal groups...");
     let ng = self.get_normal_groups(&top, group_dot, min_group_size);
-    let buf = ChangeTriangleBuffer::new();
-    let mut ctx = self.create_squash_context(top, ng, buf);
+    let buf = ChangeTriangleBuffer::default();
+    let mut ctx = self.create_merge_context(top, ng, buf);
+
     let mut rng = rand::rngs::StdRng::seed_from_u64(1500);
     let mut ti = Vec::with_capacity(self.triangles.len());
     for t in 0..self.triangles.len() {
@@ -527,9 +580,10 @@ impl Model {
     }
     let mut ttc = self.triangles.len();
 
+    let start = std::time::Instant::now();
     loop {
       println!("start loop iter with {ttc} valid triangles");
-      let mut squashed = false;
+      let mut merged = false;
       ti.shuffle(&mut rng);
       'enumerate_triangles: for &t in &ti {
         if ctx.top[t][0] == u32::MAX {
@@ -540,18 +594,21 @@ impl Model {
           let ta = ctx.top[t][i];
           let vfrom = tr[(i + 1) % 3];
           let vto = tr[i];
-          if self.squash(&mut ctx, t as u32, ta, vfrom, vto) {
+          if self.merge(&mut ctx, t as u32, ta, vfrom, vto) {
             ttc -= 2;
-            squashed = true;
+            merged = true;
             continue 'enumerate_triangles;
           }
         }
       }
-      if !squashed {
+      if !merged {
         break;
       }
     }
-    println!("end loop with {ttc} valid triangles");
+    println!(
+      "end loop with {ttc} valid triangles and {:?} time",
+      std::time::Instant::now() - start
+    );
 
     let mut j = 0;
     for i in 0..self.triangles.len() {
@@ -977,33 +1034,193 @@ impl Model {
       triangles.push([v0, v1, v2]);
     };
 
-    for y in 0..ty {
-      for x in 0..tx {
-        // bot
-        t(p(x, y, 0), p(x, y + 1, 0), p(x + 1, y + 1, 0));
-        t(p(x, y, 0), p(x + 1, y + 1, 0), p(x + 1, y, 0));
-        // top
-        t(p(x, y, tz), p(x + 1, y, tz), p(x, y + 1, tz));
-        t(p(x, y + 1, tz), p(x + 1, y, tz), p(x + 1, y + 1, tz));
+    let mut qr = |triangles: &mut Vec<Triangle>, v0, v1, v2, v3, odd| {
+      if odd & 1 == 0 {
+        triangles.push([v0, v3, v1]);
+        triangles.push([v1, v3, v2]);
+      } else {
+        triangles.push([v0, v2, v1]);
+        triangles.push([v0, v3, v2]);
       }
+    };
 
-      for z in 0..tz {
-        // left
-        t(p(0, y, z), p(0, y, z + 1), p(0, y + 1, z));
-        t(p(0, y + 1, z), p(0, y, z + 1), p(0, y + 1, z + 1));
-        // right
-        t(p(tx, y, z), p(tx, y + 1, z), p(tx, y, z + 1));
-        t(p(tx, y, z + 1), p(tx, y + 1, z), p(tx, y + 1, z + 1));
+    let mut q = |triangles: &mut Vec<Triangle>, v0, v1, v2, v3, odd| {
+      if odd & 1 == 0 {
+        triangles.push([v0, v1, v3]);
+        triangles.push([v1, v2, v3]);
+      } else {
+        triangles.push([v0, v1, v2]);
+        triangles.push([v0, v2, v3]);
+      }
+    };
+
+    for t0 in 0..ty {
+      for t1 in 0..tx {
+        qr(
+          &mut triangles,
+          p(t0, t1, 0),
+          p(t0 + 1, t1, 0),
+          p(t0 + 1, t1 + 1, 0),
+          p(t0, t1 + 1, 0),
+          t0 + t1,
+        );
+        q(
+          &mut triangles,
+          p(t0, t1, tz),
+          p(t0 + 1, t1, tz),
+          p(t0 + 1, t1 + 1, tz),
+          p(t0, t1 + 1, tz),
+          t0 + t1,
+        );
+        qr(
+          &mut triangles,
+          p(0, t0, t1),
+          p(0, t0 + 1, t1),
+          p(0, t0 + 1, t1 + 1),
+          p(0, t0, t1 + 1),
+          t0 + t1,
+        );
+        q(
+          &mut triangles,
+          p(tx, t0, t1),
+          p(tx, t0 + 1, t1),
+          p(tx, t0 + 1, t1 + 1),
+          p(tx, t0, t1 + 1),
+          t0 + t1,
+        );
+        qr(
+          &mut triangles,
+          p(t1, 0, t0),
+          p(t1, 0, t0 + 1),
+          p(t1 + 1, 0, t0 + 1),
+          p(t1 + 1, 0, t0),
+          t0 + t1,
+        );
+        q(
+          &mut triangles,
+          p(t1, ty, t0),
+          p(t1, ty, t0 + 1),
+          p(t1 + 1, ty, t0 + 1),
+          p(t1 + 1, ty, t0),
+          t0 + t1,
+        );
       }
     }
-    for z in 0..tz {
-      for x in 0..tx {
-        // near
-        t(p(x, 0, z), p(x + 1, 0, z), p(x, 0, z + 1));
-        t(p(x, 0, z + 1), p(x + 1, 0, z), p(x + 1, 0, z + 1));
-        // far
-        t(p(x, ty, z), p(x, ty, z + 1), p(x + 1, ty, z));
-        t(p(x + 1, ty, z), p(x, ty, z + 1), p(x + 1, ty, z + 1));
+
+    let mut result = Self::new();
+    result.vertices = vertices;
+    result.triangles = triangles;
+    result
+  }
+
+  pub fn damaged_cuboid(tx: usize, ty: usize, tz: usize, cell_size: f32) -> Self {
+    let mut m = FxHashMap::default();
+    let mut vertices = Vec::new();
+    let mut nv = |x: usize, y: usize, z: usize| {
+      let inserted = m.insert((x, y, z), vertices.len() as u32);
+      assert!(inserted.is_none(), "This coordinated is used before!");
+      vertices.push(Point {
+        x: x as f32 * cell_size,
+        y: y as f32 * cell_size,
+        z: z as f32 * cell_size,
+      });
+    };
+
+    for y in 0..=ty {
+      for x in 0..=tx {
+        nv(x, y, 0);
+        nv(x, y, tz);
+      }
+    }
+    for z in 1..tz {
+      for x in 0..=tx {
+        nv(x, 0, z);
+        nv(x, ty, z);
+      }
+      for y in 1..ty {
+        nv(0, y, z);
+        nv(tx, y, z);
+      }
+    }
+
+    vertices[m[&(0, 0, 2)] as usize] += Point { x: cell_size * 0.5, y: cell_size * 0.5, z: 0.0 };
+
+    let p = |x: usize, y: usize, z: usize| -> u32 { m[&(x, y, z)] };
+    let mut triangles = Vec::new();
+    let mut t = |v0, v1, v2| {
+      triangles.push([v0, v1, v2]);
+    };
+
+    let mut qr = |triangles: &mut Vec<Triangle>, v0, v1, v2, v3, odd| {
+      if odd & 1 == 0 {
+        triangles.push([v0, v3, v1]);
+        triangles.push([v1, v3, v2]);
+      } else {
+        triangles.push([v0, v2, v1]);
+        triangles.push([v0, v3, v2]);
+      }
+    };
+
+    let mut q = |triangles: &mut Vec<Triangle>, v0, v1, v2, v3, odd| {
+      if odd & 1 == 0 {
+        triangles.push([v0, v1, v3]);
+        triangles.push([v1, v2, v3]);
+      } else {
+        triangles.push([v0, v1, v2]);
+        triangles.push([v0, v2, v3]);
+      }
+    };
+
+    for t0 in 0..ty {
+      for t1 in 0..tx {
+        qr(
+          &mut triangles,
+          p(t0, t1, 0),
+          p(t0 + 1, t1, 0),
+          p(t0 + 1, t1 + 1, 0),
+          p(t0, t1 + 1, 0),
+          t0 + t1,
+        );
+        q(
+          &mut triangles,
+          p(t0, t1, tz),
+          p(t0 + 1, t1, tz),
+          p(t0 + 1, t1 + 1, tz),
+          p(t0, t1 + 1, tz),
+          t0 + t1,
+        );
+        qr(
+          &mut triangles,
+          p(0, t0, t1),
+          p(0, t0 + 1, t1),
+          p(0, t0 + 1, t1 + 1),
+          p(0, t0, t1 + 1),
+          t0 + t1,
+        );
+        q(
+          &mut triangles,
+          p(tx, t0, t1),
+          p(tx, t0 + 1, t1),
+          p(tx, t0 + 1, t1 + 1),
+          p(tx, t0, t1 + 1),
+          t0 + t1,
+        );
+        qr(
+          &mut triangles,
+          p(t1, 0, t0),
+          p(t1, 0, t0 + 1),
+          p(t1 + 1, 0, t0 + 1),
+          p(t1 + 1, 0, t0),
+          t0 + t1,
+        );
+        q(
+          &mut triangles,
+          p(t1, ty, t0),
+          p(t1, ty, t0 + 1),
+          p(t1 + 1, ty, t0 + 1),
+          p(t1 + 1, ty, t0),
+          t0 + t1,
+        );
       }
     }
 
