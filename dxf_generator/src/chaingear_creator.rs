@@ -343,7 +343,7 @@ struct InfillSpiralData {
 impl InfillSpiralData {
   fn new(tc: usize, minr: f32) -> Self {
     let maxr = tc as f32 * 12.7 / PI / 2.0 - 20.0;
-    let ba = PI * 2.0 / 5.0 * 30.0;
+    let ba = PI * 2.0 / 7.0 * 30.0;
     let chain = [
       Point { x: minr + 5.0, y: -ba * 0.5 },
       Point { x: minr + 5.0, y: 0.0 },
@@ -354,10 +354,10 @@ impl InfillSpiralData {
   }
 
   fn inside(&self, pos: Point) -> bool {
-    let ba = PI * 2.0 / 5.0;
-    let a = f32::atan2(pos.y, pos.x) - ba * 2.5;
+    let ba = PI * 2.0 / 7.0;
+    let a = f32::atan2(pos.y, pos.x) - ba * 3.5;
     let r = pos.len();
-    for t in 0..=5 {
+    for t in 0..=7 {
       let polar = Point { x: r, y: (a + ba * t as f32) * 30.0 };
       let mut pp0 = f32::INFINITY;
       let mut pp1 = f32::INFINITY;
@@ -365,7 +365,7 @@ impl InfillSpiralData {
         let c0 = self.chain[i - 1];
         let c1 = self.chain[i];
 
-        let pp = dist_pl(polar, c0, c1) - 3.0;
+        let pp = dist_pl(polar, c0, c1) - 2.5;
         if pp < 0.0 {
           return true;
         }
