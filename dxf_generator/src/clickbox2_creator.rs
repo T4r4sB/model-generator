@@ -1363,23 +1363,43 @@ impl ClickboxParams {
 
     let max_a = 2.0 * PI - self.angle_between;
     let a0 = 0.0;
-    let a1 = self.angle_between * 0.42;
-    let a2 = self.angle_between;
-    let a3 = max_a - self.angle_between * 0.84;
-    let a4 = max_a - self.angle_between * 0.42;
+    let a1 = self.angle_between * 0.39;
+    let a4 = max_a - self.angle_between * 0.39;
     let a5 = max_a;
 
-    println!(
-      "total angle={}, cable_len={}, length of 5th speed = {}",
-      max_a.to_degrees(),
-      max_a * (drum.cable_surface_r + 0.5),
-      (a3 - a2 - self.angle_between).to_degrees()
-    );
+    let dt01 = 6.0;
+    let dt12 = 3.0;
+    let dt34 = 5.0;
+    let dt45 = 6.0;
+    let h_between = 0.1;
 
-    let dt01 = 4.4;
-    let dt12 = 3.1;
-    let dt34 = 4.2;
-    let dt45 = 4.4;
+    let a0s = a0
+      + (self.depth + h_between * 2.0) / dt01
+      + dt01 * self.roll_radius / self.drum_radius * 0.05;
+    let a1s = a1
+      + (self.depth + h_between * 2.0) / dt12
+      + dt12 * self.roll_radius / self.drum_radius * 0.05;
+    let a4s = a4
+      - (self.depth + h_between * 2.0) / dt34
+      - dt34 * self.roll_radius / self.drum_radius * 0.05;
+    let a5s = a5
+      - (self.depth + h_between * 2.0) / dt45
+      - dt45 * self.roll_radius / self.drum_radius * 0.05;
+
+    println!(
+      "total angle={}, ab={}, cable_len={},
+      length of 2th speed = {},
+      length of 3th speed = {},
+      length of 5th speed = {},
+      length of 6th speed = {}",
+      max_a.to_degrees(),
+      self.angle_between.to_degrees(),
+      max_a * (drum.cable_surface_r + 0.5),
+      (a1 - a0s).to_degrees(),
+      (self.angle_between - (a1s - a0)).to_degrees(),
+      (a4s - a1s - self.angle_between).to_degrees(),
+      (a5s - a4).to_degrees()
+    );
 
     let cable_r = self.drum_radius - self.depth - 1.0;
 
@@ -1402,16 +1422,26 @@ impl ClickboxParams {
       let depth;
       if a < a0 {
         depth = -self.depth;
+      } else if a < a0s {
+        depth = f32::min(h_between, f32::min((a - a0) * dt01 - self.depth, (a0s - a) * dt01));
       } else if a < a1 {
-        depth = f32::min(0.3, f32::min((a - a0) * dt01 - self.depth, (a1 - a) * dt01));
-      } else if a < a2 {
-        depth = f32::min(self.depth + 0.3, f32::min((a - a1) * dt12, (a2 - a) * dt12 + self.depth));
-      } else if a < a3 {
+        depth = 0.0
+      } else if a < a1s {
+        depth = f32::min(
+          self.depth + h_between,
+          f32::min((a - a1) * dt12, (a1s - a) * dt12 + self.depth),
+        );
+      } else if a < a4s {
         depth = self.depth;
       } else if a < a4 {
-        depth = f32::min(self.depth + 0.3, f32::min((a - a3) * dt34 + self.depth, (a4 - a) * dt34));
+        depth = f32::min(
+          self.depth + h_between,
+          f32::min((a - a4s) * dt34 + self.depth, (a4 - a) * dt34),
+        );
+      } else if a < a5s {
+        depth = 0.0
       } else if a < a5 {
-        depth = f32::min(0.3, f32::min((a - a4) * dt45, (a5 - a) * dt45 - self.depth));
+        depth = f32::min(h_between, f32::min((a - a5s) * dt45, (a5 - a) * dt45 - self.depth));
       } else {
         depth = 0.0;
       }
@@ -1443,11 +1473,7 @@ impl DrumCreator {
   }
 
   pub fn get_height(&self, part_index: usize) -> f32 {
-    if part_index == 4 {
-      2.5
-    } else {
-      2.0
-    }
+    if part_index == 4 { 2.5 } else { 2.0 }
   }
 
   pub fn get_name(&self, part_index: usize) -> Option<&str> {
