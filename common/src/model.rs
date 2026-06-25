@@ -23,15 +23,9 @@ struct VecNextInfo {
 
 type MeshTopology = Vec<[u32; 3]>;
 
-#[derive(Debug, Default, Copy, Clone)]
-struct NormalWithTol {
-  normal: Point,
-  tol: f32,
-}
-
 struct NormalGroups {
   group_of_t: Vec<u32>,
-  normal_of_g: Vec<NormalWithTol>,
+  normal_of_g: Vec<Point>,
 }
 
 const RSQ3: f32 = 0.57735026918962576;
@@ -206,6 +200,20 @@ impl Model {
     face_adj
   }
 
+  fn get_unchecked_vertex(&self, top: &MeshTopology, old_t: u32, new_t: u32) -> u32 {
+    let top = top[new_t as usize];
+    let t = self.triangles[new_t as usize];
+    if old_t == top[0] {
+      return t[2];
+    } else if old_t == top[1] {
+      return t[0];
+    } else if old_t == top[2] {
+      return t[1];
+    } else {
+      panic!("top {top:?} of {new_t} does not have {old_t}");
+    }
+  }
+
   fn get_normal_groups(
     &self,
     top: &MeshTopology,
@@ -231,25 +239,11 @@ impl Model {
         }
       }
 
-      fn add_t(&mut self, model: &Model, top: &MeshTopology, ti: u32, prev_ti: u32) {
+      fn add_t(&mut self, model: &Model, ti: u32) {
         let t = model.triangles[ti as usize];
-        if prev_ti == u32::MAX {
-          self.add_v(model.vertices[t[0] as usize]);
-          self.add_v(model.vertices[t[1] as usize]);
-          self.add_v(model.vertices[t[2] as usize]);
-        } else {
-          let top = top[ti as usize];
-          if top[0] == prev_ti {
-            self.add_v(model.vertices[t[2] as usize]);
-          } else if top[1] == prev_ti {
-            self.add_v(model.vertices[t[0] as usize]);
-          } else if top[2] == prev_ti {
-            self.add_v(model.vertices[t[1] as usize]);
-          } else {
-            panic!("top {top:?} of {ti} does not have {prev_ti}");
-          }
-        }
-        //self.strength += model.get_perp(model.triangles[ti as usize]).len();
+        self.add_v(model.vertices[t[0] as usize]);
+        self.add_v(model.vertices[t[1] as usize]);
+        self.add_v(model.vertices[t[2] as usize]);
       }
 
       fn strength(&self) -> f32 {
@@ -265,7 +259,7 @@ impl Model {
 
     let mut group_of_t = Vec::<u32>::new();
     let mut valid_group_mapping = Vec::<u32>::new();
-    let mut normal_of_g = Vec::<NormalWithTol>::new();
+    let mut normal_of_g = Vec::<Point>::new();
     let mut stack = std::collections::VecDeque::<u32>::new();
     let mut visited = Vec::<u32>::new();
     let mut visited_ng = Vec::<u32>::new();
@@ -299,15 +293,15 @@ impl Model {
           continue;
         }
         let mut g = info_of_g.len();
-        let cn = self.get_normal(self.triangles[ti as usize]);
+        let t0 = self.triangles[ti as usize];
+        let cn = self.get_normal(t0);
         let cl = cn.len();
         if cl == 0.0 {
           continue;
         }
         let cn = cn.scale(cl.recip());
         let mut ig = GroupInfo::new();
-        ig.add_t(self, top, ti, u32::MAX);
-        let mut nt = NormalWithTol { normal: cn, tol };
+        ig.add_t(self, ti);
         stack.push_back(ti);
         group_of_t[ti as usize] = g as u32;
         visited.push(ti);
@@ -324,7 +318,8 @@ impl Model {
               continue;
             }
 
-            ig.add_t(self, top, new_ti, cur_ti);
+            let new_v = self.vertices[self.get_unchecked_vertex(top, cur_ti, new_ti) as usize];
+            ig.add_v(new_v);
             group_of_t[new_ti as usize] = g as u32;
             visited.push(new_ti);
             stack.push_back(new_ti);
@@ -334,7 +329,7 @@ impl Model {
 
         if ig.strength() >= min_group_size || last_iter {
           info_of_g.push(ig);
-          normal_of_g.push(nt);
+          normal_of_g.push(cn);
           cnt_grouped += visited.len();
           visited.clear();
         } else {
@@ -549,11 +544,8 @@ impl Model {
         let nnl = nn.len();
 
         let gi = if nl { gleft } else { gright };
-        if gi != u32::MAX {
-          let g: NormalWithTol = ctx.ng.normal_of_g[gi as usize];
-          if dot(g.normal, nn) <= 0.0 {
+        if gi != u32::MAX && dot(ctx.ng.normal_of_g[gi as usize], nn) < 0.0 {
             return false;
-          }
         }
 
         ctx.buf.t.push((cur, nt));
