@@ -209,16 +209,17 @@ impl Model {
   fn get_normal_groups(
     &self,
     top: &MeshTopology,
-    group_dot: f32,
+    max_tol: f32,
     min_group_size: f32,
   ) -> NormalGroups {
     struct GroupInfo {
       extremal: [(f32, f32); REPER_VECTORS.len()],
+      strength: f32,
     }
 
     impl GroupInfo {
       fn new() -> Self {
-        Self { extremal: [(f32::INFINITY, -f32::INFINITY); REPER_VECTORS.len()] }
+        Self { extremal: [(f32::INFINITY, -f32::INFINITY); REPER_VECTORS.len()], strength: 0.0 }
       }
 
       fn add_v(&mut self, p: Point) {
@@ -230,11 +231,25 @@ impl Model {
         }
       }
 
-      fn add_t(&mut self, model: &Model, ti: usize) {
-        let t = model.triangles[ti];
-        self.add_v(model.vertices[t[0] as usize]);
-        self.add_v(model.vertices[t[1] as usize]);
-        self.add_v(model.vertices[t[2] as usize]);
+      fn add_t(&mut self, model: &Model, top: &MeshTopology, ti: u32, prev_ti: u32) {
+        let t = model.triangles[ti as usize];
+        if prev_ti == u32::MAX {
+          self.add_v(model.vertices[t[0] as usize]);
+          self.add_v(model.vertices[t[1] as usize]);
+          self.add_v(model.vertices[t[2] as usize]);
+        } else {
+          let top = top[ti as usize];
+          if top[0] == prev_ti {
+            self.add_v(model.vertices[t[2] as usize]);
+          } else if top[1] == prev_ti {
+            self.add_v(model.vertices[t[0] as usize]);
+          } else if top[2] == prev_ti {
+            self.add_v(model.vertices[t[1] as usize]);
+          } else {
+            panic!("top {top:?} of {ti} does not have {prev_ti}");
+          }
+        }
+        //self.strength += model.get_perp(model.triangles[ti as usize]).len();
       }
 
       fn strength(&self) -> f32 {
@@ -243,56 +258,60 @@ impl Model {
           result = f32::max(result, e.1 - e.0);
         }
         result
+
+        //self.strength
       }
     }
 
     let mut group_of_t = Vec::<u32>::new();
     let mut valid_group_mapping = Vec::<u32>::new();
     let mut normal_of_g = Vec::<NormalWithTol>::new();
-    let mut stack = Vec::<u32>::new();
+    let mut stack = std::collections::VecDeque::<u32>::new();
     let mut visited = Vec::<u32>::new();
     let mut visited_ng = Vec::<u32>::new();
     let mut info_of_g = Vec::<GroupInfo>::new();
 
     group_of_t.resize(self.triangles.len(), u32::MAX);
 
-    let mut tol = 0.99999;
+    let mut tol = 1.0e-6;
 
     let mut ti = Vec::with_capacity(self.triangles.len());
     for i in 0..self.triangles.len() {
-      ti.push(i);
+      ti.push(i as u32);
     }
     ti.shuffle(&mut rand::rngs::StdRng::seed_from_u64(10938109));
 
+    let mut cnt_grouped = 0;
+    let max_step = max_tol * 0.2;
+
+    let start = std::time::Instant::now();
     loop {
-      println!("get_normal_groups with tol {tol}...");
-      let next_tol = tol - (1.0 - tol);
-      let last_iter = next_tol < group_dot;
+      println!(
+        "get_normal_groups with tol {tol}, {} grouped...",
+        cnt_grouped as f32 * 100.0 / self.triangles.len() as f32
+      );
+      let next_tol = tol + f32::min(tol * 9.0, max_step);
+      let last_iter = next_tol > max_tol;
       let mut complete = true;
 
       for &ti in &ti {
-        if group_of_t[ti] != u32::MAX {
+        if group_of_t[ti as usize] != u32::MAX {
           continue;
         }
-
-        let cn = self.get_perp(self.triangles[ti]);
-        let cnl = cn.len();
-        if cnl == 0.0 {
-          continue;
-        }
-        let cn = cn.scale(cnl.recip());
-
-        let mut ig = GroupInfo::new();
-        ig.add_t(self, ti);
-        let mut nt = NormalWithTol { normal: cn, tol };
-
-        stack.clear();
-        stack.push(ti as u32);
-        visited.push(ti as u32);
-
         let mut g = info_of_g.len();
-        group_of_t[ti] = g as u32;
-        while let Some(cur_ti) = stack.pop() {
+        let cn = self.get_normal(self.triangles[ti as usize]);
+        let cl = cn.len();
+        if cl == 0.0 {
+          continue;
+        }
+        let cn = cn.scale(cl.recip());
+        let mut ig = GroupInfo::new();
+        ig.add_t(self, top, ti, u32::MAX);
+        let mut nt = NormalWithTol { normal: cn, tol };
+        stack.push_back(ti);
+        group_of_t[ti as usize] = g as u32;
+        visited.push(ti);
+        while let Some(cur_ti) = stack.pop_front() {
           for new_ti in top[cur_ti as usize] {
             let g_ti = group_of_t[new_ti as usize];
             if g_ti != u32::MAX {
@@ -301,20 +320,22 @@ impl Model {
 
             let nn = self.get_perp(self.triangles[new_ti as usize]);
             let ln = nn.len();
-            if dot(nn, cn) < tol * ln {
+            if dot(nn, cn) < (1.0 - tol) * ln {
               continue;
             }
 
-            ig.add_t(self, new_ti as usize);
+            ig.add_t(self, top, new_ti, cur_ti);
             group_of_t[new_ti as usize] = g as u32;
             visited.push(new_ti);
-            stack.push(new_ti);
+            stack.push_back(new_ti);
           }
         }
+        stack.clear();
 
-        if ig.strength() >= min_group_size || last_iter{
+        if ig.strength() >= min_group_size || last_iter {
           info_of_g.push(ig);
           normal_of_g.push(nt);
+          cnt_grouped += visited.len();
           visited.clear();
         } else {
           complete = false;
@@ -336,6 +357,15 @@ impl Model {
         break;
       }
     }
+
+    println!("generating normals elapsed {:?}", std::time::Instant::now() - start);
+    println!(
+      "{} grouped in {} groups, {} ungrouped",
+      cnt_grouped as f32 * 100.0 / self.triangles.len() as f32,
+      normal_of_g.len(),
+      self.triangles.len() - cnt_grouped
+    );
+
     NormalGroups { group_of_t, normal_of_g }
   }
 
@@ -521,7 +551,7 @@ impl Model {
         let gi = if nl { gleft } else { gright };
         if gi != u32::MAX {
           let g: NormalWithTol = ctx.ng.normal_of_g[gi as usize];
-          if dot(g.normal, nn) <= g.tol * nnl {
+          if dot(g.normal, nn) <= 0.0 {
             return false;
           }
         }
@@ -565,11 +595,12 @@ impl Model {
     true
   }
 
-  pub fn optimize(&mut self, width: f32, group_dot: f32, min_group_size: f32) {
+  pub fn optimize(&mut self, width: f32, max_tol: f32, min_group_size: f32) {
     println!("get topology...");
     let top = self.get_topology();
     println!("get normal groups...");
-    let ng = self.get_normal_groups(&top, group_dot, min_group_size);
+    let mut ng = self.get_normal_groups(&top, max_tol, min_group_size);
+
     let buf = ChangeTriangleBuffer::default();
     let mut ctx = self.create_merge_context(top, ng, buf);
 
@@ -745,9 +776,9 @@ impl Model {
     mappings.into_iter().map(|(_, m)| m.m).collect()
   }
 
-  pub fn split_by_normal(self, group_dot: f32, min_group_size: f32) -> Vec<Model> {
+  pub fn split_by_normal(mut self, max_tol: f32, min_group_size: f32) -> Vec<Model> {
     let top = self.get_topology();
-    let ng = self.get_normal_groups(&top, group_dot, min_group_size);
+    let mut ng = self.get_normal_groups(&top, max_tol, min_group_size);
     self.split_by(&|i| ng.group_of_t[i as usize].wrapping_add(2))
   }
 
