@@ -14,13 +14,6 @@ pub struct Model {
   pub triangles: Vec<Triangle>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct VecNextInfo {
-  v: u32,
-  f_left: u32,
-  f_right: u32,
-}
-
 type MeshTopology = Vec<[u32; 3]>;
 
 struct NormalGroups {
@@ -587,7 +580,7 @@ impl Model {
     true
   }
 
-  pub fn optimize(&mut self, width: f32, max_tol: f32, min_group_size: f32) {
+  pub fn optimize(&mut self, max_tol: f32, min_group_size: f32) {
     println!("get topology...");
     let top = self.get_topology();
     println!("get normal groups...");
