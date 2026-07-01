@@ -912,11 +912,11 @@ impl ContourCreator {
   }
 
   fn fill_ti(
-    i1: u32,
-    i2: u32,
-    i3: u32,
-    p12: PartIndex,
-    p13: PartIndex,
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p12: u32,
+    p13: u32,
     result: &mut HashMap<PartIndex, HashMap<u32, u32>>,
   ) {
     if i1 != 0 && i1 != i2 && i1 != i3 {
@@ -928,11 +928,11 @@ impl ContourCreator {
   }
 
   fn fill_to(
-    i1: u32,
-    i2: u32,
-    i3: u32,
-    p21: PartIndex,
-    p31: PartIndex,
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p21: u32,
+    p31: u32,
     result: &mut HashMap<PartIndex, HashMap<u32, u32>>,
   ) {
     if i1 != i2 && i2 != 0 && i2 == i3 {
@@ -944,15 +944,15 @@ impl ContourCreator {
   }
 
   fn fill_t(
-    i1: u32,
-    i2: u32,
-    i3: u32,
-    p12: PartIndex,
-    p21: PartIndex,
-    p13: PartIndex,
-    p31: PartIndex,
-    p23: PartIndex,
-    p32: PartIndex,
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p12: u32,
+    p21: u32,
+    p13: u32,
+    p31: u32,
+    p23: u32,
+    p32: u32,
     result: &mut HashMap<PartIndex, HashMap<u32, u32>>,
   ) {
     Self::fill_ti(i1, i2, i3, p12, p13, result);
@@ -1056,9 +1056,10 @@ impl ContourCreator {
         macro_rules! fill_center_mid {
           ($c: expr, $dst1: ident, $dst2: ident) => {
             let c_index = cells[$c].index;
-            if center_index != c_index {
+            if center_index != 0 && c_index == 0 {
               let pt1 = find_root(part_f, center, cells[$c].pos, center_index, self.tries);
               $dst1 = Self::index_of_new_point(&mut self.points, pt1);
+            } else if center_index == 0 && c_index != 0  {
               let pt2 = find_root(part_f, cells[$c].pos, center, c_index, self.tries);
               $dst2 = Self::index_of_new_point(&mut self.points, pt2);
             }

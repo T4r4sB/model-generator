@@ -35,7 +35,6 @@ enum GearInfillImpl {
 
 struct GearContour {
   tc: usize,
-  name: &'static str,
   pin_r: f32,
   edge: f32,
   pin_c_r: f32,
@@ -46,7 +45,7 @@ struct GearContour {
 }
 
 impl GearContour {
-  fn new(tc: usize, couple: GearCouple, infill: GearInfill, name: &'static str) -> Self {
+  fn new(tc: usize, couple: GearCouple, infill: GearInfill) -> Self {
     let pin_r = 8.51 * 0.5;
     let edge = 12.7;
     let pin_c_r = edge * 0.5 / (PI / tc as f32).sin();
@@ -69,7 +68,7 @@ impl GearContour {
       }
     };
 
-    Self { tc, name, pin_r, edge, pin_c_r, pairing_r, circles, couple, infill }
+    Self { tc, pin_r, edge, pin_c_r, pairing_r, circles, couple, infill }
   }
 
   fn get_minr(couple: &GearCouple) -> f32 {
@@ -401,7 +400,10 @@ pub struct ChaingearCreator {
 
 impl ChaingearCreator {
   pub fn new() -> Self {
-    let gears = vec![GearContour::new(27, GearCouple::Inner3Euro, GearInfill::Spiral, "27-rear")];
+    let gears = vec![
+      GearContour::new(27, GearCouple::Inner3Euro, GearInfill::Spiral),
+      GearContour::new(23, GearCouple::Inner3Euro, GearInfill::Grid),
+    ];
 
     let h3e = DriverHole3EuroData::new();
     let h6 = DriverHole6Data::new();
@@ -435,8 +437,14 @@ impl ChaingearCreator {
     100.0
   }
 
-  pub fn get_name(&self, part_index: usize) -> Option<&str> {
-    Some(self.gears[part_index].name)
+  pub fn get_name(&self, part_index: usize) -> Option<String> {
+    let g = &self.gears[part_index];
+    let desc = match g.couple {
+      GearCouple::Inner3Euro => format!("{}-rear-3pins-euro", g.tc),
+      GearCouple::Inner6 => format!("{}-rear-6pins", g.tc),
+      GearCouple::Adapter7Bolt => format!("{}-rear-adater7bolts", g.tc),
+    };
+    Some(desc)
   }
 
   pub fn get_sticker_index(&self, pos: Point, part_index: usize) -> PartIndex {
