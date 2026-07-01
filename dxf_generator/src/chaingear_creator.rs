@@ -429,14 +429,6 @@ impl ChaingearCreator {
     3.0
   }
 
-  pub fn get_quality() -> usize {
-    1
-  }
-
-  pub fn get_size() -> f32 {
-    100.0
-  }
-
   pub fn get_name(&self, part_index: usize) -> Option<String> {
     let g = &self.gears[part_index];
     let desc = match g.couple {
@@ -472,33 +464,6 @@ impl ChaingearCreator {
       if in_infill {
         return 0;
       }
-
-      /*
-
-      } else if part_index < 2 {
-
-      } else {
-        for i in 0..3 {
-          let angle = f32::atan2(pos.y, pos.x) - i as f32 * 2.0 * PI / 3.0;
-          let angle = angle.rem_euclid(2.0 * PI);
-          let r = pos.len();
-          let ak = 30.0;
-          let a = angle * ak;
-
-          let pp = Point { x: r, y: a };
-          let pp1 = Point { x: 28.5, y: 0.6 * ak };
-          let pp2 = Point { x: 28.5, y: 1.4 * ak };
-          let pp3 = Point { x: 40.5, y: 2.6 * ak };
-          let pp4 = Point { x: 40.5, y: 3.4 * ak };
-          if dist_pl(pp, pp1, pp2) < sqr(1.0)
-            || dist_pl(pp, pp2, pp3) < sqr(1.0)
-            || dist_pl(pp, pp3, pp4) < sqr(1.0)
-          {
-            return 0;
-          }
-        }
-      }
-      */
 
       return g.contains(pos) as PartIndex;
     }

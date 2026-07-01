@@ -842,7 +842,7 @@ impl FragmentedParts {
 #[derive(Debug, Clone, Copy)]
 pub struct ContourCell {
   index: PartIndex,
-  pos: Point,
+  corner: Point,
   v_mz: u32,
   v_pz: u32,
   v_zm: u32,
@@ -853,7 +853,7 @@ impl ContourCell {
   fn new() -> Self {
     Self {
       index: 0,
-      pos: Point { x: 0.0, y: 0.0 },
+      corner: Point { x: 0.0, y: 0.0 },
       v_mz: BAD_INDEX,
       v_pz: BAD_INDEX,
       v_zm: BAD_INDEX,
@@ -901,8 +901,8 @@ impl ContourCreator {
     y: usize,
     part_f: &dyn Fn(Point) -> PartIndex,
   ) {
-    cell.pos = self.corner_of_cell(x, y);
-    cell.index = part_f(cell.pos);
+    cell.corner = self.corner_of_cell(x, y);
+    cell.index = part_f(cell.corner);
   }
 
   fn index_of_new_point(points: &mut Vec<Point>, pt: Point) -> u32 {
@@ -977,38 +977,59 @@ impl ContourCreator {
 
     let mut result = HashMap::new();
 
-    macro_rules! fill_mid {
-      ($c: expr, $field: ident, $p1: expr, $p2: expr) => {
-        if cells[$c].index != 0 {
-          let pt = find_root(part_f, $p1, $p2, cells[$c].index, self.tries);
-          cells[$c].$field = Self::index_of_new_point(&mut self.points, pt);
+    macro_rules! fill_mids {
+      (
+        $index1: expr, $point1: expr, $target1: expr,
+        $index2: expr, $point2: expr, $target2: expr
+      ) => {
+        if $index1 != $index2 {
+          if $index1 != 0 {
+            if $index2 != 0 {
+              let (pt1, pt2) = find_2roots(part_f, $point1, $point2, $index1, $index2, self.tries);
+              $target1 = Self::index_of_new_point(&mut self.points, pt1);
+              $target2 = Self::index_of_new_point(&mut self.points, pt2);
+            } else {
+              let pt = find_root(part_f, $point1, $point2, $index1, self.tries);
+              $target1 = Self::index_of_new_point(&mut self.points, pt);
+            }
+          } else {
+            if $index2 != 0 {
+              let pt = find_root(part_f, $point2, $point1, $index2, self.tries);
+              $target2 = Self::index_of_new_point(&mut self.points, pt);
+            }
+          }
         }
       };
     }
 
-    macro_rules! fill_mids {
-      ($c1: expr, $field1: ident,
-            $c2: expr, $field2: ident) => {
-        if cells[$c1].index != cells[$c2].index {
-          fill_mid!($c1, $field1, cells[$c1].pos, cells[$c2].pos);
-          fill_mid!($c2, $field2, cells[$c2].pos, cells[$c1].pos);
-        }
+    macro_rules! fill_side_mids {
+      ($ci1: expr, $target_field1: ident, $ci2: expr, $target_field2: ident) => {
+        let c1 = &cells[$ci1];
+        let c2 = &cells[$ci2];
+        fill_mids!(
+          c1.index,
+          c1.corner,
+          cells[$ci1].$target_field1,
+          c2.index,
+          c2.corner,
+          cells[$ci2].$target_field2
+        );
       };
     }
 
     self.fill_cell(&mut cells[0], 0, 0, part_f);
     if cells[0].index != 0 {
-      panic!("Fail aabb in position {:?}", cells[0].pos);
+      panic!("Fail aabb in position {:?}", cells[0].corner);
     }
 
     for x in 1..szx {
       self.fill_cell(&mut cells[x], x, 0, part_f);
 
       if cells[x].index != 0 {
-        panic!("Fail aabb in position {:?}", cells[x].pos);
+        panic!("Fail aabb in position {:?}", cells[x].corner);
       }
 
-      fill_mids!(x - 1, v_pz, x, v_mz);
+      fill_side_mids!(x - 1, v_pz, x, v_mz);
     }
 
     for y in 1..szy {
@@ -1017,10 +1038,10 @@ impl ContourCreator {
       let c11 = c;
 
       self.fill_cell(&mut cells[c11], 0, y, part_f);
-      fill_mids!(c10, v_zp, c11, v_zm);
+      fill_side_mids!(c10, v_zp, c11, v_zm);
 
       if cells[c11].index != 0 {
-        panic!("Fail aabb in position {:?}", cells[c11].pos);
+        panic!("Fail aabb in position {:?}", cells[c11].corner);
       }
 
       for x in 1..szx {
@@ -1033,12 +1054,12 @@ impl ContourCreator {
 
         if x == szx - 1 || y == szy - 1 {
           if cells[c11].index != 0 {
-            panic!("Fail aabb in position {:?}", cells[c11].pos);
+            panic!("Fail aabb in position {:?}", cells[c11].corner);
           }
         }
 
-        fill_mids!(c01, v_pz, c11, v_mz);
-        fill_mids!(c10, v_zp, c11, v_zm);
+        fill_side_mids!(c01, v_pz, c11, v_mz);
+        fill_side_mids!(c10, v_zp, c11, v_zm);
 
         // fill cell here
         let center = self.center_of_cell(x, y);
@@ -1054,15 +1075,9 @@ impl ContourCreator {
         let mut v_ppo = BAD_INDEX;
 
         macro_rules! fill_center_mid {
-          ($c: expr, $dst1: ident, $dst2: ident) => {
-            let c_index = cells[$c].index;
-            if center_index != 0 && c_index == 0 {
-              let pt1 = find_root(part_f, center, cells[$c].pos, center_index, self.tries);
-              $dst1 = Self::index_of_new_point(&mut self.points, pt1);
-            } else if center_index == 0 && c_index != 0  {
-              let pt2 = find_root(part_f, cells[$c].pos, center, c_index, self.tries);
-              $dst2 = Self::index_of_new_point(&mut self.points, pt2);
-            }
+          ($ci: expr, $dst1: ident, $dst2: ident) => {
+            let c = &cells[$ci];
+            fill_mids!(center_index, center, $dst1, c.index, c.corner, $dst2);
           };
         }
 

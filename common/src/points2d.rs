@@ -128,6 +128,35 @@ pub fn find_root(
   }
 }
 
+pub fn find_2roots(
+  f: &dyn Fn(Point) -> u32,
+  mut pos1: Point,
+  mut pos2: Point,
+  target1: u32,
+  target2: u32,
+  tries: usize,
+) -> (Point, Point) {
+  let mut i = 0;
+  loop {
+    i += 1;
+    let mid = (pos1 + pos2).scale(0.5);
+    if i >= tries {
+      return (mid, mid);
+    }
+    let r = f(mid);
+    if r == target1 {
+      pos1 = mid;
+    } else if r == target2 {
+      pos2 = mid;
+    } else {
+      return (
+        find_root(f, pos1, mid, target1, tries - i),
+        find_root(f, pos2, mid, target2, tries - i),
+      );
+    }
+  }
+}
+
 pub fn dist_pl(p: Point, p1: Point, p2: Point) -> f32 {
   let p12 = p2 - p1;
   let l = p12.len();
