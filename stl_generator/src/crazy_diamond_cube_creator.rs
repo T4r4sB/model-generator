@@ -100,7 +100,7 @@ impl CubeCreator {
   }
 
   pub fn get_quality() -> usize {
-    320
+    120
   }
 
   pub fn get_size() -> f32 {

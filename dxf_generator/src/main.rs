@@ -12,6 +12,9 @@ use fxhash::FxHashMap;
 mod chaingear_creator;
 type PartCreator = chaingear_creator::ChaingearCreator;
 
+//mod clickbox2_creator;
+//type PartCreator = clickbox2_creator::ClickboxCreator;
+
 pub struct ImgBuffer {
   v: Vec<u8>,
   size_x: usize,
@@ -290,7 +293,7 @@ fn create_mockup() {
       Point { x: 20.0, y: -40.0 },
       -45.0 * std::f32::consts::PI / 180.0,
     ),
-    
+
     ColoredContourSet::load(
       &sd_path.join("x12.dxf"),
       (0, 255, 224),
@@ -309,7 +312,7 @@ fn create_mockup() {
       Point { x: 140.0, y: -40.0 },
       135.0 * std::f32::consts::PI / 180.0,
     ),
-    
+
     ColoredContourSet::load(
       &sd_path.join("x12.dxf"),
       (255, 128, 0),
@@ -322,7 +325,7 @@ fn create_mockup() {
       Point { x: -120.0, y: 15.0 },
       135.0 * std::f32::consts::PI / 180.0,
     ),
-    
+
     ColoredContourSet::load(
       &sd_path.join("x12.dxf"),
       (0, 64, 255),
@@ -445,7 +448,7 @@ fn main() {
   for i in 0..part_creator.faces() {
     let aabb = part_creator.aabb(i).unwrap_or(AABB::around_zero(200.0));
 
-    let mut cc = ContourCreator::new(aabb, 0.2, 20);
+    let mut cc = ContourCreator::new(aabb, 0.2, 10);
 
     let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
     print!("generate {name} in aabb {:?}...", aabb);
@@ -486,6 +489,7 @@ fn main() {
         println!("{}", msg);
       }
 
+      /*
       let ex = cc.extrude(h);
 
       let single_j = ex.len() == 1;
@@ -498,6 +502,7 @@ fn main() {
           println!("{}", msg);
         }
       }
+      */
     }
   }
 

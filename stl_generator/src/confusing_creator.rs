@@ -107,8 +107,7 @@ impl ConfusingCreator {
   }
 
   pub fn get_quality() -> usize {
-    // 384 generates edge used twice
-    120
+    384
   }
 
   pub fn get_size() -> f32 {
@@ -126,7 +125,7 @@ impl ConfusingCreator {
     //if pos.y < 0.0 { return 0; }
 
     if r < sphere_r {
-      //return 0; // tmp
+       // return 0; // tmp
       if r > sphere_r - 0.3 {
         return 0;
       }
@@ -200,6 +199,8 @@ impl ConfusingCreator {
 
     if index == 0 {
       index = 256;
+    } else {
+       // return 0; // tmp
     }
 
     let rr;
@@ -271,15 +272,15 @@ impl ConfusingCreator {
     }
 
     let scenario = 0;
-    let mut x_tile = 2000;
-    let mut y_tile = 3000;
-    let mut z_tile = 1000;
+    let mut x_tile = 20000;
+    let mut y_tile = 30000;
+    let mut z_tile = 10000;
     let mut diag_tol = 0.08;
     if scenario == 1 {
-      (x_tile, y_tile, z_tile) = (5000, 5000, 5000);
+      (x_tile, y_tile, z_tile) = (50000, 50000, 50000);
       diag_tol = -0.08;
     } else if scenario == 2 {
-      (x_tile, y_tile, z_tile) = (6000, 6000, 6000);
+      (x_tile, y_tile, z_tile) = (60000, 60000, 60000);
       diag_tol = -0.08;
     }
 
@@ -364,12 +365,12 @@ impl ConfusingCreator {
       }
     }
 
-    if index < 1000  {
-   //   return 0; //tmp
+    if index > 10000 {
+       // return 0; // tmp
     }
 
     let cupd = 1.0;
-    if (index < 1000 && index.count_ones() == 1 || index % 1000 == 2)
+    if (index < 10000 && index.count_ones() == 1 || index % 10000 == 2)
       && nx > cupd
       && ny > cupd
       && nz > cupd

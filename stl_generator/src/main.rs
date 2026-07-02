@@ -23,8 +23,8 @@ mod resources;
 #[macro_use]
 mod errors;
 
-mod confusing_creator;
-type PartCreator = confusing_creator::ConfusingCreator;
+mod zmey_gorynych_creator;
+type PartCreator = zmey_gorynych_creator::ZmeyGorynychCreator;
 
 //mod railroad_creator;
 //type PartCreator = railroad_creator::RailroadCreator;
@@ -144,22 +144,31 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
   let mut sum_t_before = 0;
   let mut sum_t_after = 0;
 
+ //models.clear();
+ // models.insert(1, Model::cuboid(10, 10, 10, 10.0));
+
   for (&m_index, m) in &mut models {
     sum_v += m.vertices.len();
     max_v = std::cmp::max(max_v, m.vertices.len());
     m.validate_and_delete_small_groups();
-    let smooth_cnt = quality / 50;
+    let smooth_cnt = quality / 5;
     if smooth_cnt > 0 {
       println!();
       for i in 0..smooth_cnt {
-        m.smooth(0.4);
+        m.smooth(0.1);
         print!("\rmake model {m_index} smooth, progress [{i}/{smooth_cnt}]");
       }
     }
     sum_t_before += m.triangles.len();
     if quality > 0 {
       println!("tcount before = {}", m.triangles.len());
-      m.optimize(width, 0.5, 1000, 0.99);
+
+
+     //for m in m.clone().split_by_normal(0.9, 1.0) {
+     //   groups_of_models.insert(groups_of_models.len() as u32, m);
+    //  }
+
+      m.optimize(0.03, 1.0);
       println!("tcount after {}", m.triangles.len());
     }
     sum_t_after += m.triangles.len();
@@ -173,7 +182,7 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
 
     weights.push((m_index, volume * 7.850 * 0.001));
 
-    if quality > 30 {
+    if quality > 3 {
       println!(
         "save {m_index} to stl... {} vertices {} triangles {} volume {} mass",
         m.vertices.len(),
@@ -189,7 +198,8 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
     }
   }
 
-  // models = groups_of_models;
+  println!("Has {} groups", groups_of_models.len());
+  //models = groups_of_models;
 
   let end_opt = std::time::Instant::now();
 
@@ -224,17 +234,11 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
 
 fn main() {
   let mut models = generate_models();
-  /*
-  let mut model = Model::cuboid(500, 500, 500, 0.1);
-  model.optimize(0.0, 0.9999, 1, 0.0);
-  println!("{} triangles", model.triangles.len());
-  let mut models = FxHashMap::<PartIndex, Model>::default();
-  models.insert(1, model);*/
 
   if let Err(_) = crate::gl_window::run(
     "ОКНО С ПРИКОЛАМИ",
     &mut models.iter().map(|(m_index, m)| {
-      println!("model {m_index} has {} vertices", m.vertices.len());
+      // println!("model {m_index} has {} vertices", m.vertices.len());
       let color = match m_index / 10000 {
         1 => 0x00FF00,
         2 => 0xFF2000,
@@ -244,7 +248,7 @@ fn main() {
         6 => 0xFFFF00,
         7 => 0xFF00FF,
         8 => 0xFF80FF,
-        _ => (m_index + 1).wrapping_mul(0x274381) as u32 | 0x808080,
+        _ => m_index.wrapping_mul(0x2743811) as u32 | 0x808080,
       };
       (color, m)
     }),

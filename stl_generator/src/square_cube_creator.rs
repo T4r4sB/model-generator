@@ -20,11 +20,13 @@ pub struct SquareCubeCreator {
   axis1: Vec<Point>,
   axis2: Vec<Point>,
   add_a: FxHashMap<PartIndex, Vec<Point>>,
-  add_b: FxHashMap<PartIndex, Vec<Point>>,
+  add_b: FxHashMap<PartIndex, (Vec<Point>, Point)>,
   normals: Vec<Point>,
   groove: Vec<f32>,
   axis_pos: RefCell<Vec<(f32, Point)>>,
   axis_neg: RefCell<Vec<(f32, Point)>>,
+  trenchs: Vec<(f32, f32)>,
+  pin_factor: f32,
   sz: f32,
 }
 
@@ -115,7 +117,7 @@ impl SquareCubeCreator {
             a1.rotate(mid, -PI * 2.0 / 6.0),
             a1.rotate(mid, PI * 2.0 / 6.0),
           ];
-          add_b.insert((1 << ia1) + (1 << ia2) + (1 << ia3), v);
+          add_b.insert((1 << ia1) + (1 << ia2) + (1 << ia3), (v, mid));
           add_a.insert((1 << ia1) + (1 << ia2) + (1 << ia3), av);
         }
       }
@@ -147,9 +149,11 @@ impl SquareCubeCreator {
     let axis_neg = RefCell::new(Vec::new());
 
     let groove = vec![
-      (max_angle - 1.25 / (sz - 8.8)).cos(),
+      (max_angle - 6.0 / (sz - 9.2)).cos(),
+      sz - 13.0,
+      (max_angle - 2.25 / (sz - 9.2)).cos(),
       sz - 9.0,
-      (min_angle_core + 2.0 / (sz - 8.8)).cos(),
+      (min_angle_core + 2.0 / (sz - 9.2)).cos(),
       sz - 7.0,
       (max_angle - 2.25 / (sz - 7.2)).cos(),
       sz - 5.0,
@@ -167,7 +171,48 @@ impl SquareCubeCreator {
       axis2.push(a2);
     }
 
-    Self { axis, axis1, axis2, normals, groove, axis_pos, axis_neg, add_a, add_b, sz }
+    let a0 = axis[0];
+    let a1 = axis[2];
+    let a2 = a0.rotate(a1, PI / 6.0);
+    let a3 = a0.rotate(a1, PI / 3.0);
+
+    let mut edges = Vec::new();
+    edges.push((a0, a1));
+    edges.push((a2, a1));
+    edges.push((a3, a1));
+    edges.push((a1.rotate(a2, PI / 6.0), a2));
+    edges.push((a1.rotate(a2, PI / 3.0), a2));
+    edges.push((a1.rotate(a3, PI / 6.0), a3));
+    edges.push((a1.rotate(a3, PI / 3.0), a3));
+    let mut trenchs = Vec::new();
+
+    let pin_factor = 0.35;
+    for e in edges {
+      let da = 1.45 / (sz - 11.2);
+
+      let p = (e.0 + (e.1 - e.0).scale(pin_factor)).norm();
+      let a = dot(p, a0).acos();
+      trenchs.push(((a + da).cos(), (a - da).cos()));
+
+      let p = (e.1 + (e.0 - e.1).scale(pin_factor)).norm();
+      let a = dot(p, a0).acos();
+      trenchs.push(((a + da).cos(), (a - da).cos()));
+    }
+
+    Self {
+      axis,
+      axis1,
+      axis2,
+      normals,
+      groove,
+      axis_pos,
+      axis_neg,
+      add_a,
+      add_b,
+      pin_factor,
+      sz,
+      trenchs,
+    }
   }
 
   pub fn faces(&self) -> usize {
@@ -202,7 +247,7 @@ impl SquareCubeCreator {
   }
 
   pub fn get_quality() -> usize {
-    384
+    512
   }
 
   pub fn get_size() -> f32 {
@@ -216,35 +261,54 @@ impl SquareCubeCreator {
     }
 
     let sz = self.sz;
-    let sphere_r = self.groove[1] - 4.4;
 
-    if r > self.groove[7] - 1.0 {
-      // return 0;
-    }
+    let sphere_or = self.groove[3] - 2.2;
+    let mut sphere_r = sphere_or;
+    let sphere_ir = self.groove[3] - 8.4;
 
     if r < sphere_r {
-      if r > sphere_r - 0.2 {
-        return 0;
+      if r > sphere_r - 4.0 {
+        for &a in &self.axis {
+          let c = dot(pos, a);
+          for trench in &self.trenchs {
+            if c > trench.0 * r && c < trench.1 * r {
+              sphere_r = self.groove[3] - 4.2;
+            }
+          }
+        }
+
+        for &a in &self.axis {
+          let c = dot(pos, a);
+          let s = cross(pos, a).len();
+          if c > 0.0 && s < 6.4 {
+            sphere_r = self.groove[3] - 6.2;
+          }
+        }
       }
-      if r < sphere_r - 5.0 {
-        return 0;
-      }
-      let mut frame = false;
-      for &a in &self.axis {
-        let c = dot(pos, a);
-        let s = cross(pos, a).len();
-        if c > 0.0 && s < 1.5 {
+
+      if r < sphere_r {
+        if r < sphere_ir {
           return 0;
         }
-        if c.abs() < 2.5 || s < 5.0 {
-          frame = true;
+        let mut frame = false;
+        for &a in &self.axis {
+          let c = dot(pos, a);
+          let s = cross(pos, a).len();
+          if c > 0.0 && s < 1.5 {
+            return 0;
+          }
+          if c.abs() < 5.0 || s < 5.0 {
+            frame = true;
+          }
         }
+        if !frame {
+          return 0;
+        }
+        return 31;
       }
-      if !frame {
-        return 0;
-      }
-      return 31;
     }
+
+    //return 0;
 
     let mut dists = [(f32::INFINITY, 0); 6];
     for (i, n) in self.normals.iter().enumerate() {
@@ -268,12 +332,13 @@ impl SquareCubeCreator {
     let mut index: PartIndex = 0;
 
     let (mut shift_out, mut shift_in, inter) = get_groove(r, &self.groove, 0.03);
-    let factor = (self.groove[1] + 0.2) / r;
+
+    let factor = (self.groove[3] - 0.2) / r;
     if factor > 1.0 {
       shift_out *= factor;
       shift_in *= factor;
     }
-    let factor = (self.groove[3] - 0.2) / r;
+    let factor = (self.groove[5] - 0.2) / r;
     if factor < 1.0 {
       shift_out *= factor;
       shift_in *= factor;
@@ -330,6 +395,7 @@ impl SquareCubeCreator {
     }
 
     let hole_r = if r < sphere_r { 1.5 } else { 1.2 };
+
     if index.count_ones() == 1 {
       let a = self.axis[index.ilog2() as usize];
       let c = cross(pos, a).len();
@@ -338,7 +404,7 @@ impl SquareCubeCreator {
         return 0;
       }
 
-      if d > sz || r < self.groove[1] + 0.2 {
+      if d > sz || r < self.groove[1] - 1.8 {
         return 0;
       }
       if d > sz - 1.0 {
@@ -352,7 +418,7 @@ impl SquareCubeCreator {
       return index;
     }
 
-    if let Some(add_b) = self.add_b.get(&index) {
+    if let Some((add_b, _)) = self.add_b.get(&index) {
       for i in 0..add_b.len() {
         if match_axis(&mut index, pos, add_b[i], i + 6) == 0 {
           return 0;
@@ -368,7 +434,27 @@ impl SquareCubeCreator {
         }
       }
     }
-    if index.count_ones() > 3 && r < self.groove[3] + 0.2 {
+
+    let check_pins = |p1: Point, p2: Point| {
+      let mc = 1.0 * r / sphere_or;
+      cross(pos, (p1 + (p2 - p1).scale(self.pin_factor)).norm()).len() < mc
+        || cross(pos, (p2 + (p1 - p2).scale(self.pin_factor)).norm()).len() < mc
+    };
+
+    if r < self.groove[3] - 0.8 && r > self.groove[3] - 3.8 {
+      if let Some((_, mid)) = self.add_b.get(&index) {
+        if check_pins(axis_pos[0].1, *mid) {
+          return index;
+        }
+      }
+      if index.count_ones() == 2 {
+        if check_pins(axis_pos[0].1, axis_pos[1].1) {
+          return index;
+        }
+      }
+    }
+
+    if r < self.groove[3] - 1.8 || index.count_ones() > 3 && r < self.groove[5] + 0.2 {
       return 0;
     }
 
@@ -400,7 +486,7 @@ impl SquareCubeCreator {
     let mut rr = 1.0f32;
 
     if index.count_ones() == 2 || index.count_ones() == 3 {
-      if r > self.groove[7] + 0.2 || r < self.groove[5] - 0.2 {
+      if r > self.groove[9] + 0.2 || r < self.groove[7] - 0.2 {
         rr = 0.1f32;
       } else {
         rr = 0.2f32;

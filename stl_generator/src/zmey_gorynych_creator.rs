@@ -390,7 +390,6 @@ impl ZmeyGorynychCreator {
     //if r > self.groove0_inner[1] - 1.0 { return 0; }
 
     if r < self.core_r {
-      return 0; // tmp
       if r > self.core_r - 0.2 {
         return 0;
       }
@@ -647,14 +646,9 @@ impl ZmeyGorynychCreator {
           } else {
             index += color_index;
           }
-        } else {
-          return 0; // tmp
         }
-      } else {
-        return 0; // tmp
       }
     } else {
-      return 0; // tmp
       index += color_index;
     }
 

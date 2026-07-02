@@ -51,9 +51,9 @@ unsafe fn maybe_window_proc(
         } else if wparam == VK_CONTROL as WPARAM {
           gl_data.input_state.down = true;
         } else if wparam == VK_OEM_PLUS as WPARAM {
-          gl_data.shift += 0.1;
+          gl_data.shift += 0.01;
         } else if wparam == VK_OEM_MINUS as WPARAM {
-          gl_data.shift = f32::max(0.0, gl_data.shift - 0.1);
+          gl_data.shift = f32::max(0.0, gl_data.shift - 0.01);
         }
       }
     }

@@ -93,7 +93,6 @@ macro_rules! run_api_no_skip {
 macro_rules! run_api {
     ($e: expr) => {{
         let r = run_api_no_skip!($e);
-        SetLastError(0);
         r
     }};
 }

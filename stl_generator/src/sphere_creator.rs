@@ -112,10 +112,6 @@ impl SphereCreator {
   }
 
   pub fn get_part_index(&self, mut pos: Point) -> PartIndex {
-    let r = pos.len();
-    if r < 18.5 {
-      return 0;
-    }
 
     if r > 23.1 {
       return 0;
