@@ -837,17 +837,21 @@ impl FragmentedParts {
   }
 }
 
-type Triangle = [u32; 3];
+#[derive(Debug, Copy, Clone)]
+struct Triangle {
+  color: u32,
+  vertices: [u32; 3],
+}
 
 #[derive(Debug)]
 pub struct Triangulation {
   points: Vec<Point>,
-  triangles: FxHashMap<PartIndex, Vec<Triangle>>,
+  triangles: Vec<Triangle>,
 }
 
 impl Triangulation {
   fn new() -> Self {
-    Self { points: Vec::new(), triangles: FxHashMap::default() }
+    Self { points: Vec::new(), triangles: Vec::new() }
   }
 
   pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
@@ -860,26 +864,73 @@ impl Triangulation {
         drawing.remove_dim_style(dc - 1 - i);
       }
     }
-    for (i, t) in &self.triangles {
-      for t in t {
-        let mut pl = Polyline::default();
-        fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
-          dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
-        }
-        pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t[0] as usize]));
-        pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t[1] as usize]));
-        pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t[2] as usize]));
-        pl.set_is_closed(true);
-        let mut e = Entity::new(EntityType::Polyline(pl));
-        drawing.add_entity(e);
+    for t in &self.triangles {
+      let mut pl = Polyline::default();
+      fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
+        dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
       }
+      pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t.vertices[0] as usize]));
+      pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t.vertices[1] as usize]));
+      pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t.vertices[2] as usize]));
+      pl.set_is_closed(true);
+      let mut e = Entity::new(EntityType::Polyline(pl));
+      drawing.add_entity(e);
     }
 
     drawing
       .save_file(path)
       .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))
   }
+
+  fn get_topology(&self) -> TriangulationTopology {
+    let mut edge_to_triangle = FxHashMap::<(u32, u32), (u32, u32)>::default();
+    const BAD_INDEX: u32 = u32::MAX;
+    let mut make_edge = |t, v1, v2| {
+      if v1 < v2 {
+        let e = edge_to_triangle.entry((v1, v2)).or_insert((BAD_INDEX, BAD_INDEX));
+        if e.0 != BAD_INDEX {
+          panic!("fail with edge {v1} to {v2} while add {t}: {:?}, first elem still used", e);
+        }
+        e.0 = t;
+      } else {
+        let e = edge_to_triangle.entry((v2, v1)).or_insert((BAD_INDEX, BAD_INDEX));
+        if e.1 != BAD_INDEX {
+          panic!("fail with edge {v1} to {v2} while add {t}: {:?}, second elem still used", e);
+        }
+        e.1 = t;
+      }
+    };
+
+    for i in 0..self.triangles.len() {
+      let v = self.triangles[i].vertices;
+      make_edge(i as u32, v[0], v[1]);
+      make_edge(i as u32, v[1], v[2]);
+      make_edge(i as u32, v[2], v[0]);
+    }
+
+    let mut triangle_adj = Vec::<[u32; 3]>::new();
+    triangle_adj.resize(self.triangles.len(), [BAD_INDEX; 3]);
+
+    let use_edge = |dst: &mut u32, v1, v2| {
+      if v1 < v2 {
+        *dst = edge_to_triangle.get(&(v1, v2)).unwrap().1;
+      } else {
+        *dst = edge_to_triangle.get(&(v2, v1)).unwrap().0;
+      }
+    };
+
+    for i in 0..self.triangles.len() {
+      let v = self.triangles[i].vertices;
+      use_edge(&mut triangle_adj[i][0], v[0], v[1]);
+      use_edge(&mut triangle_adj[i][1], v[1], v[2]);
+      use_edge(&mut triangle_adj[i][2], v[2], v[0]);
+    }
+
+    triangle_adj
+  }
 }
+
+type TriangulationTopology = Vec<[u32; 3]>;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ContourCell {
@@ -999,13 +1050,13 @@ impl ContourCreator {
     p1: u32,
     p2: u32,
     p3: u32,
-    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+    triangles: &mut Vec<Triangle>,
   ) -> bool {
     if i1 == i2 && i1 == i3 {
       assert!(p1 != BAD_INDEX);
       assert!(p2 != BAD_INDEX);
       assert!(p3 != BAD_INDEX);
-      triangles.entry(i1).or_default().push([p1, p2, p3]);
+      triangles.push(Triangle{color:i1, vertices: [p1, p2, p3]});
       return true;
     }
     false
@@ -1020,7 +1071,7 @@ impl ContourCreator {
     p3: u32,
     p12: u32,
     p13: u32,
-    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+    triangles: &mut Vec<Triangle>,
   ) -> bool {
     if i1 > 0 && i2 == 0 && i3 == 0 {
       assert!(p1 != BAD_INDEX);
@@ -1028,9 +1079,9 @@ impl ContourCreator {
       assert!(p3 != BAD_INDEX);
       assert!(p12 != BAD_INDEX);
       assert!(p13 != BAD_INDEX);
-      triangles.entry(i1).or_default().push([p1, p12, p13]);
-      triangles.entry(0).or_default().push([p12, p2, p3]);
-      triangles.entry(0).or_default().push([p12, p3, p13]);
+      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
+      triangles.push(Triangle{color:0, vertices: [p12, p2, p3]});
+      triangles.push(Triangle{color:0, vertices: [p12, p3, p13]});
       return true;
     }
     false
@@ -1045,7 +1096,7 @@ impl ContourCreator {
     p3: u32,
     p13: u32,
     p23: u32,
-    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+    triangles: &mut Vec<Triangle>,
   ) -> bool {
     if i1 == i2 && i1 > 0 && i3 == 0 {
       assert!(p1 != BAD_INDEX);
@@ -1053,9 +1104,9 @@ impl ContourCreator {
       assert!(p3 != BAD_INDEX);
       assert!(p13 != BAD_INDEX);
       assert!(p23 != BAD_INDEX);
-      triangles.entry(i1).or_default().push([p1, p2, p23]);
-      triangles.entry(i1).or_default().push([p1, p23, p13]);
-      triangles.entry(0).or_default().push([p3, p13, p23]);
+      triangles.push(Triangle{color:i1, vertices: [p1, p2, p23]});
+      triangles.push(Triangle{color:i1, vertices: [p1, p23, p13]});
+      triangles.push(Triangle{color:0, vertices: [p3, p13, p23]});
       return true;
     }
     false
@@ -1072,7 +1123,7 @@ impl ContourCreator {
     p21: u32,
     p13: u32,
     p31: u32,
-    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+    triangles: &mut Vec<Triangle>,
   ) -> bool {
     if i1 > 0 && i2 > 0 && i2 == i3 && i1 != i2 {
       assert!(p1 != BAD_INDEX);
@@ -1082,11 +1133,11 @@ impl ContourCreator {
       assert!(p21 != BAD_INDEX);
       assert!(p13 != BAD_INDEX);
       assert!(p31 != BAD_INDEX);
-      triangles.entry(i1).or_default().push([p1, p12, p13]);
-      triangles.entry(0).or_default().push([p12, p21, p31]);
-      triangles.entry(0).or_default().push([p12, p31, p13]);
-      triangles.entry(i2).or_default().push([p21, p2, p3]);
-      triangles.entry(i2).or_default().push([p21, p3, p31]);
+      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
+      triangles.push(Triangle{color:0, vertices: [p12, p21, p31]});
+      triangles.push(Triangle{color:0, vertices: [p12, p31, p13]});
+      triangles.push(Triangle{color:i2, vertices: [p21, p2, p3]});
+      triangles.push(Triangle{color:i2, vertices: [p21, p3, p31]});
       return true;
     }
     false
@@ -1103,7 +1154,7 @@ impl ContourCreator {
     p21: u32,
     p23: u32,
     p13: u32,
-    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+    triangles: &mut Vec<Triangle>,
   ) -> bool {
     if i1 > 0 && i2 > 0 && i3 == 0 && i1 != i2 {
       assert!(p1 != BAD_INDEX);
@@ -1113,11 +1164,11 @@ impl ContourCreator {
       assert!(p21 != BAD_INDEX);
       assert!(p23 != BAD_INDEX);
       assert!(p13 != BAD_INDEX);
-      triangles.entry(i1).or_default().push([p1, p12, p13]);
-      triangles.entry(i2).or_default().push([p2, p23, p21]);
-      triangles.entry(0).or_default().push([p3, p13, p12]);
-      triangles.entry(0).or_default().push([p3, p12, p21]);
-      triangles.entry(0).or_default().push([p3, p21, p23]);
+      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
+      triangles.push(Triangle{color:i2, vertices: [p2, p23, p21]});
+      triangles.push(Triangle{color:0, vertices: [p3, p13, p12]});
+      triangles.push(Triangle{color:0, vertices: [p3, p12, p21]});
+      triangles.push(Triangle{color:0, vertices: [p3, p21, p23]});
       return true;
     }
     false
@@ -1136,7 +1187,7 @@ impl ContourCreator {
     p31: u32,
     p23: u32,
     p32: u32,
-    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+    triangles: &mut Vec<Triangle>,
   ) -> bool {
     if i1 > 0 && i2 > 0 && i3 > 0 && i1 != i2 && i1 != i3 && i2 != i3 {
       assert!(p1 != BAD_INDEX);
@@ -1148,13 +1199,13 @@ impl ContourCreator {
       assert!(p32 != BAD_INDEX);
       assert!(p31 != BAD_INDEX);
       assert!(p13 != BAD_INDEX);
-      triangles.entry(i1).or_default().push([p1, p12, p13]);
-      triangles.entry(i2).or_default().push([p2, p23, p21]);
-      triangles.entry(i3).or_default().push([p3, p31, p32]);
-      triangles.entry(0).or_default().push([p12, p21, p23]);
-      triangles.entry(0).or_default().push([p12, p23, p32]);
-      triangles.entry(0).or_default().push([p12, p32, p31]);
-      triangles.entry(0).or_default().push([p12, p31, p13]);
+      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
+      triangles.push(Triangle{color:i2, vertices: [p2, p23, p21]});
+      triangles.push(Triangle{color:i3, vertices: [p3, p31, p32]});
+      triangles.push(Triangle{color:0, vertices: [p12, p21, p23]});
+      triangles.push(Triangle{color:0, vertices: [p12, p23, p32]});
+      triangles.push(Triangle{color:0, vertices: [p12, p32, p31]});
+      triangles.push(Triangle{color:0, vertices: [p12, p31, p13]});
       return true;
     }
     false
@@ -1174,7 +1225,7 @@ impl ContourCreator {
     p23: u32,
     p32: u32,
     result: &mut FxHashMap<PartIndex, FxHashMap<u32, u32>>,
-    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+    triangles: &mut Vec<Triangle>,
   ) {
     Self::fill_ti(i1, i2, i3, p12, p13, result);
     Self::fill_to(i1, i2, i3, p21, p31, result);
@@ -1424,11 +1475,10 @@ impl ContourCreator {
       })
       .collect();
 
-    println!("vs={}", self.points.capacity());
     triangulation.points = self.points.clone();
-    for (mi, t) in &triangulation.triangles {
-      println!("m[{mi}] has {} triangles", t.capacity());
-    }
+    let top = triangulation.get_topology();
+
+    println!("vs={}, ts={}", triangulation.points.capacity(), triangulation.triangles.capacity());
 
     (contours, triangulation)
   }
