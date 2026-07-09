@@ -596,9 +596,7 @@ impl ContourSet {
     with_grid: bool,
   ) -> Result<(), String> {
     let mut drawing = Drawing::new();
-
     drawing.header.drawing_units = dxf::enums::DrawingUnits::Metric;
-
     {
       // CYPCUT access violation fix
       let dc = drawing.dim_styles().count();
@@ -839,10 +837,55 @@ impl FragmentedParts {
   }
 }
 
+type Triangle = [u32; 3];
+
+#[derive(Debug)]
+pub struct Triangulation {
+  points: Vec<Point>,
+  triangles: FxHashMap<PartIndex, Vec<Triangle>>,
+}
+
+impl Triangulation {
+  fn new() -> Self {
+    Self { points: Vec::new(), triangles: FxHashMap::default() }
+  }
+
+  pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
+    let mut drawing = Drawing::new();
+    drawing.header.drawing_units = dxf::enums::DrawingUnits::Metric;
+    {
+      // CYPCUT access violation fix
+      let dc = drawing.dim_styles().count();
+      for i in 0..dc {
+        drawing.remove_dim_style(dc - 1 - i);
+      }
+    }
+    for (i, t) in &self.triangles {
+      for t in t {
+        let mut pl = Polyline::default();
+        fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
+          dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
+        }
+        pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t[0] as usize]));
+        pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t[1] as usize]));
+        pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t[2] as usize]));
+        pl.set_is_closed(true);
+        let mut e = Entity::new(EntityType::Polyline(pl));
+        drawing.add_entity(e);
+      }
+    }
+
+    drawing
+      .save_file(path)
+      .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))
+  }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ContourCell {
-  index: PartIndex,
+  corner_part_index: PartIndex,
   corner: Point,
+  corner_point_index: u32,
   v_mz: u32,
   v_pz: u32,
   v_zm: u32,
@@ -852,8 +895,9 @@ pub struct ContourCell {
 impl ContourCell {
   fn new() -> Self {
     Self {
-      index: 0,
+      corner_part_index: 0,
       corner: Point { x: 0.0, y: 0.0 },
+      corner_point_index: BAD_INDEX,
       v_mz: BAD_INDEX,
       v_pz: BAD_INDEX,
       v_zm: BAD_INDEX,
@@ -895,19 +939,20 @@ impl ContourCreator {
   }
 
   fn fill_cell(
-    &self,
+    &mut self,
     cell: &mut ContourCell,
     x: usize,
     y: usize,
     part_f: &dyn Fn(Point) -> PartIndex,
   ) {
     cell.corner = self.corner_of_cell(x, y);
-    cell.index = part_f(cell.corner);
+    cell.corner_part_index = part_f(cell.corner);
+    cell.corner_point_index = self.index_of_new_point(cell.corner);
   }
 
-  fn index_of_new_point(points: &mut Vec<Point>, pt: Point) -> u32 {
-    let result = points.len() as u32;
-    points.push(pt);
+  fn index_of_new_point(&mut self, pt: Point) -> u32 {
+    let result = self.points.len() as u32;
+    self.points.push(pt);
     result
   }
 
@@ -917,14 +962,16 @@ impl ContourCreator {
     i3: PartIndex,
     p12: u32,
     p13: u32,
-    result: &mut HashMap<PartIndex, HashMap<u32, u32>>,
-  ) {
+    result: &mut FxHashMap<PartIndex, FxHashMap<u32, u32>>,
+  ) -> bool {
     if i1 != 0 && i1 != i2 && i1 != i3 {
       assert!(p12 != BAD_INDEX);
       assert!(p13 != BAD_INDEX);
       let prev = result.entry(i1).or_default().insert(p12, p13);
       assert!(prev.is_none());
+      return true;
     }
+    false
   }
 
   fn fill_to(
@@ -933,27 +980,201 @@ impl ContourCreator {
     i3: PartIndex,
     p21: u32,
     p31: u32,
-    result: &mut HashMap<PartIndex, HashMap<u32, u32>>,
-  ) {
+    result: &mut FxHashMap<PartIndex, FxHashMap<u32, u32>>,
+  ) -> bool {
     if i1 != i2 && i2 != 0 && i2 == i3 {
       assert!(p21 != BAD_INDEX);
       assert!(p31 != BAD_INDEX);
       let prev = result.entry(i2).or_default().insert(p31, p21);
       assert!(prev.is_none());
+      return true;
     }
+    false
   }
 
-  fn fill_t(
+  fn fill_tt_aaa(
     i1: PartIndex,
     i2: PartIndex,
     i3: PartIndex,
+    p1: u32,
+    p2: u32,
+    p3: u32,
+    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+  ) -> bool {
+    if i1 == i2 && i1 == i3 {
+      assert!(p1 != BAD_INDEX);
+      assert!(p2 != BAD_INDEX);
+      assert!(p3 != BAD_INDEX);
+      triangles.entry(i1).or_default().push([p1, p2, p3]);
+      return true;
+    }
+    false
+  }
+
+  fn fill_tt_a00(
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p1: u32,
+    p2: u32,
+    p3: u32,
+    p12: u32,
+    p13: u32,
+    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+  ) -> bool {
+    if i1 > 0 && i2 == 0 && i3 == 0 {
+      assert!(p1 != BAD_INDEX);
+      assert!(p2 != BAD_INDEX);
+      assert!(p3 != BAD_INDEX);
+      assert!(p12 != BAD_INDEX);
+      assert!(p13 != BAD_INDEX);
+      triangles.entry(i1).or_default().push([p1, p12, p13]);
+      triangles.entry(0).or_default().push([p12, p2, p3]);
+      triangles.entry(0).or_default().push([p12, p3, p13]);
+      return true;
+    }
+    false
+  }
+
+  fn fill_tt_aa0(
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p1: u32,
+    p2: u32,
+    p3: u32,
+    p13: u32,
+    p23: u32,
+    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+  ) -> bool {
+    if i1 == i2 && i1 > 0 && i3 == 0 {
+      assert!(p1 != BAD_INDEX);
+      assert!(p2 != BAD_INDEX);
+      assert!(p3 != BAD_INDEX);
+      assert!(p13 != BAD_INDEX);
+      assert!(p23 != BAD_INDEX);
+      triangles.entry(i1).or_default().push([p1, p2, p23]);
+      triangles.entry(i1).or_default().push([p1, p23, p13]);
+      triangles.entry(0).or_default().push([p3, p13, p23]);
+      return true;
+    }
+    false
+  }
+
+  fn fill_tt_abb(
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p1: u32,
+    p2: u32,
+    p3: u32,
+    p12: u32,
+    p21: u32,
+    p13: u32,
+    p31: u32,
+    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+  ) -> bool {
+    if i1 > 0 && i2 > 0 && i2 == i3 && i1 != i2 {
+      assert!(p1 != BAD_INDEX);
+      assert!(p2 != BAD_INDEX);
+      assert!(p3 != BAD_INDEX);
+      assert!(p12 != BAD_INDEX);
+      assert!(p21 != BAD_INDEX);
+      assert!(p13 != BAD_INDEX);
+      assert!(p31 != BAD_INDEX);
+      triangles.entry(i1).or_default().push([p1, p12, p13]);
+      triangles.entry(0).or_default().push([p12, p21, p31]);
+      triangles.entry(0).or_default().push([p12, p31, p13]);
+      triangles.entry(i2).or_default().push([p21, p2, p3]);
+      triangles.entry(i2).or_default().push([p21, p3, p31]);
+      return true;
+    }
+    false
+  }
+
+  fn fill_tt_ab0(
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p1: u32,
+    p2: u32,
+    p3: u32,
+    p12: u32,
+    p21: u32,
+    p23: u32,
+    p13: u32,
+    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+  ) -> bool {
+    if i1 > 0 && i2 > 0 && i3 == 0 && i1 != i2 {
+      assert!(p1 != BAD_INDEX);
+      assert!(p2 != BAD_INDEX);
+      assert!(p3 != BAD_INDEX);
+      assert!(p12 != BAD_INDEX);
+      assert!(p21 != BAD_INDEX);
+      assert!(p23 != BAD_INDEX);
+      assert!(p13 != BAD_INDEX);
+      triangles.entry(i1).or_default().push([p1, p12, p13]);
+      triangles.entry(i2).or_default().push([p2, p23, p21]);
+      triangles.entry(0).or_default().push([p3, p13, p12]);
+      triangles.entry(0).or_default().push([p3, p12, p21]);
+      triangles.entry(0).or_default().push([p3, p21, p23]);
+      return true;
+    }
+    false
+  }
+
+  fn fill_tt_abc(
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p1: u32,
+    p2: u32,
+    p3: u32,
     p12: u32,
     p21: u32,
     p13: u32,
     p31: u32,
     p23: u32,
     p32: u32,
-    result: &mut HashMap<PartIndex, HashMap<u32, u32>>,
+    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
+  ) -> bool {
+    if i1 > 0 && i2 > 0 && i3 > 0 && i1 != i2 && i1 != i3 && i2 != i3 {
+      assert!(p1 != BAD_INDEX);
+      assert!(p2 != BAD_INDEX);
+      assert!(p3 != BAD_INDEX);
+      assert!(p12 != BAD_INDEX);
+      assert!(p21 != BAD_INDEX);
+      assert!(p23 != BAD_INDEX);
+      assert!(p32 != BAD_INDEX);
+      assert!(p31 != BAD_INDEX);
+      assert!(p13 != BAD_INDEX);
+      triangles.entry(i1).or_default().push([p1, p12, p13]);
+      triangles.entry(i2).or_default().push([p2, p23, p21]);
+      triangles.entry(i3).or_default().push([p3, p31, p32]);
+      triangles.entry(0).or_default().push([p12, p21, p23]);
+      triangles.entry(0).or_default().push([p12, p23, p32]);
+      triangles.entry(0).or_default().push([p12, p32, p31]);
+      triangles.entry(0).or_default().push([p12, p31, p13]);
+      return true;
+    }
+    false
+  }
+
+  fn fill_t(
+    i1: PartIndex,
+    i2: PartIndex,
+    i3: PartIndex,
+    p1: u32,
+    p2: u32,
+    p3: u32,
+    p12: u32,
+    p21: u32,
+    p13: u32,
+    p31: u32,
+    p23: u32,
+    p32: u32,
+    result: &mut FxHashMap<PartIndex, FxHashMap<u32, u32>>,
+    triangles: &mut FxHashMap<PartIndex, Vec<Triangle>>,
   ) {
     Self::fill_ti(i1, i2, i3, p12, p13, result);
     Self::fill_to(i1, i2, i3, p21, p31, result);
@@ -961,41 +1182,58 @@ impl ContourCreator {
     Self::fill_to(i2, i3, i1, p32, p12, result);
     Self::fill_ti(i3, i1, i2, p31, p32, result);
     Self::fill_to(i3, i1, i2, p13, p23, result);
+
+    Self::fill_tt_aaa(i1, i2, i3, p1, p2, p3, triangles)
+      || Self::fill_tt_a00(i1, i2, i3, p1, p2, p3, p12, p13, triangles)
+      || Self::fill_tt_a00(i2, i3, i1, p2, p3, p1, p23, p21, triangles)
+      || Self::fill_tt_a00(i3, i1, i2, p3, p1, p2, p31, p32, triangles)
+      || Self::fill_tt_aa0(i1, i2, i3, p1, p2, p3, p13, p23, triangles)
+      || Self::fill_tt_aa0(i2, i3, i1, p2, p3, p1, p21, p31, triangles)
+      || Self::fill_tt_aa0(i3, i1, i2, p3, p1, p2, p32, p12, triangles)
+      || Self::fill_tt_abb(i1, i2, i3, p1, p2, p3, p12, p21, p13, p31, triangles)
+      || Self::fill_tt_abb(i2, i3, i1, p2, p3, p1, p23, p32, p21, p12, triangles)
+      || Self::fill_tt_abb(i3, i1, i2, p3, p1, p2, p31, p13, p32, p23, triangles)
+      || Self::fill_tt_ab0(i1, i2, i3, p1, p2, p3, p12, p21, p23, p13, triangles)
+      || Self::fill_tt_ab0(i2, i3, i1, p2, p3, p1, p23, p32, p31, p21, triangles)
+      || Self::fill_tt_ab0(i3, i1, i2, p3, p1, p2, p31, p13, p12, p32, triangles)
+      || Self::fill_tt_abc(i1, i2, i3, p1, p2, p3, p12, p21, p13, p31, p23, p32, triangles);
   }
 
   pub fn make_contour(
     &mut self,
     part_f: &dyn Fn(Point) -> PartIndex,
-  ) -> HashMap<PartIndex, ContourSet> {
+  ) -> (FxHashMap<PartIndex, ContourSet>, Triangulation) {
     if self.size_x == 0 || self.size_y == 0 {
-      return HashMap::new();
+      return (FxHashMap::default(), Triangulation::new());
     }
 
     let mut cells = vec![ContourCell::new(); self.size_x * self.size_y];
     let szx = self.size_x;
     let szy = self.size_y;
 
-    let mut result = HashMap::new();
+    let mut result = FxHashMap::default();
+    let mut triangulation = Triangulation::new();
 
     macro_rules! fill_mids {
       (
-        $index1: expr, $point1: expr, $target1: expr,
-        $index2: expr, $point2: expr, $target2: expr
+        $part_index1: expr, $point1: expr, $target1: expr,
+        $part_index2: expr, $point2: expr, $target2: expr
       ) => {
-        if $index1 != $index2 {
-          if $index1 != 0 {
-            if $index2 != 0 {
-              let (pt1, pt2) = find_2roots(part_f, $point1, $point2, $index1, $index2, self.tries);
-              $target1 = Self::index_of_new_point(&mut self.points, pt1);
-              $target2 = Self::index_of_new_point(&mut self.points, pt2);
+        if $part_index1 != $part_index2 {
+          if $part_index1 != 0 {
+            if $part_index2 != 0 {
+              let (pt1, pt2) =
+                find_2roots(part_f, $point1, $point2, $part_index1, $part_index2, self.tries);
+              $target1 = self.index_of_new_point(pt1);
+              $target2 = self.index_of_new_point(pt2);
             } else {
-              let pt = find_root(part_f, $point1, $point2, $index1, self.tries);
-              $target1 = Self::index_of_new_point(&mut self.points, pt);
+              let pt = find_root(part_f, $point1, $point2, $part_index1, self.tries);
+              $target1 = self.index_of_new_point(pt);
             }
           } else {
-            if $index2 != 0 {
-              let pt = find_root(part_f, $point2, $point1, $index2, self.tries);
-              $target2 = Self::index_of_new_point(&mut self.points, pt);
+            if $part_index2 != 0 {
+              let pt = find_root(part_f, $point2, $point1, $part_index2, self.tries);
+              $target2 = self.index_of_new_point(pt);
             }
           }
         }
@@ -1007,10 +1245,10 @@ impl ContourCreator {
         let c1 = &cells[$ci1];
         let c2 = &cells[$ci2];
         fill_mids!(
-          c1.index,
+          c1.corner_part_index,
           c1.corner,
           cells[$ci1].$target_field1,
-          c2.index,
+          c2.corner_part_index,
           c2.corner,
           cells[$ci2].$target_field2
         );
@@ -1018,14 +1256,14 @@ impl ContourCreator {
     }
 
     self.fill_cell(&mut cells[0], 0, 0, part_f);
-    if cells[0].index != 0 {
+    if cells[0].corner_part_index != 0 {
       panic!("Fail aabb in position {:?}", cells[0].corner);
     }
 
     for x in 1..szx {
       self.fill_cell(&mut cells[x], x, 0, part_f);
 
-      if cells[x].index != 0 {
+      if cells[x].corner_part_index != 0 {
         panic!("Fail aabb in position {:?}", cells[x].corner);
       }
 
@@ -1040,7 +1278,7 @@ impl ContourCreator {
       self.fill_cell(&mut cells[c11], 0, y, part_f);
       fill_side_mids!(c10, v_zp, c11, v_zm);
 
-      if cells[c11].index != 0 {
+      if cells[c11].corner_part_index != 0 {
         panic!("Fail aabb in position {:?}", cells[c11].corner);
       }
 
@@ -1053,7 +1291,7 @@ impl ContourCreator {
         self.fill_cell(&mut cells[c11], x, y, part_f);
 
         if x == szx - 1 || y == szy - 1 {
-          if cells[c11].index != 0 {
+          if cells[c11].corner_part_index != 0 {
             panic!("Fail aabb in position {:?}", cells[c11].corner);
           }
         }
@@ -1063,7 +1301,8 @@ impl ContourCreator {
 
         // fill cell here
         let center = self.center_of_cell(x, y);
-        let center_index = part_f(center);
+        let center_part_index = part_f(center);
+        let center_point_index = self.index_of_new_point(center);
 
         let mut v_mmi = BAD_INDEX;
         let mut v_mmo = BAD_INDEX;
@@ -1077,7 +1316,7 @@ impl ContourCreator {
         macro_rules! fill_center_mid {
           ($ci: expr, $dst1: ident, $dst2: ident) => {
             let c = &cells[$ci];
-            fill_mids!(center_index, center, $dst1, c.index, c.corner, $dst2);
+            fill_mids!(center_part_index, center, $dst1, c.corner_part_index, c.corner, $dst2);
           };
         }
 
@@ -1087,9 +1326,12 @@ impl ContourCreator {
         fill_center_mid!(c11, v_ppi, v_ppo);
 
         Self::fill_t(
-          center_index,
-          cells[c00].index,
-          cells[c10].index,
+          center_part_index,
+          cells[c00].corner_part_index,
+          cells[c10].corner_part_index,
+          center_point_index,
+          cells[c00].corner_point_index,
+          cells[c10].corner_point_index,
           v_mmi,
           v_mmo,
           v_pmi,
@@ -1097,12 +1339,16 @@ impl ContourCreator {
           cells[c00].v_pz,
           cells[c10].v_mz,
           &mut result,
+          &mut triangulation.triangles,
         );
 
         Self::fill_t(
-          center_index,
-          cells[c10].index,
-          cells[c11].index,
+          center_part_index,
+          cells[c10].corner_part_index,
+          cells[c11].corner_part_index,
+          center_point_index,
+          cells[c10].corner_point_index,
+          cells[c11].corner_point_index,
           v_pmi,
           v_pmo,
           v_ppi,
@@ -1110,12 +1356,16 @@ impl ContourCreator {
           cells[c10].v_zp,
           cells[c11].v_zm,
           &mut result,
+          &mut triangulation.triangles,
         );
 
         Self::fill_t(
-          center_index,
-          cells[c11].index,
-          cells[c01].index,
+          center_part_index,
+          cells[c11].corner_part_index,
+          cells[c01].corner_part_index,
+          center_point_index,
+          cells[c11].corner_point_index,
+          cells[c01].corner_point_index,
           v_ppi,
           v_ppo,
           v_mpi,
@@ -1123,12 +1373,16 @@ impl ContourCreator {
           cells[c11].v_mz,
           cells[c01].v_pz,
           &mut result,
+          &mut triangulation.triangles,
         );
 
         Self::fill_t(
-          center_index,
-          cells[c01].index,
-          cells[c00].index,
+          center_part_index,
+          cells[c01].corner_part_index,
+          cells[c00].corner_part_index,
+          center_point_index,
+          cells[c01].corner_point_index,
+          cells[c00].corner_point_index,
           v_mpi,
           v_mpo,
           v_mmi,
@@ -1136,11 +1390,12 @@ impl ContourCreator {
           cells[c01].v_zm,
           cells[c00].v_zp,
           &mut result,
+          &mut triangulation.triangles,
         );
       }
     }
 
-    result
+    let contours = result
       .into_iter()
       .map(|(model_index, mut edges)| {
         let mut parts = FragmentedParts::new();
@@ -1167,7 +1422,15 @@ impl ContourCreator {
         let contour_set = parts.into_contour_set(points);
         (model_index, contour_set)
       })
-      .collect()
+      .collect();
+
+    println!("vs={}", self.points.capacity());
+    triangulation.points = self.points.clone();
+    for (mi, t) in &triangulation.triangles {
+      println!("m[{mi}] has {} triangles", t.capacity());
+    }
+
+    (contours, triangulation)
   }
 }
 
