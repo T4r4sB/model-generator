@@ -1,4 +1,5 @@
 use common::model::*;
+use common::points2d::complex_mul;
 use common::points3d::*;
 use common::solid::*;
 use num::Float;
@@ -57,7 +58,7 @@ impl Knot5Creator {
   }
 
   pub fn faces(&self) -> usize {
-    1
+    20
   }
 
   pub fn get_height(&self, current_normal: usize) -> f32 {
@@ -81,7 +82,12 @@ impl Knot5Creator {
   }
 
   pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
-    self.get_part_index(Point { x: pos.x, y: 0.0, z: pos.y })
+    if current_normal == 0 {
+      self.get_part_index(Point { x: pos.x, y: pos.y, z: 0.0 })
+    } else {
+      let a = crate::points2d::Point::from_angle((current_normal as f32 - 10.0) / 5.0);
+      self.get_part_index(Point { x: pos.x * a.x, y: pos.x * a.y, z: pos.y })
+    }
   }
 
   pub fn get_part_index(&self, mut pos: Point) -> PartIndex {
@@ -90,9 +96,10 @@ impl Knot5Creator {
     let loc_r = 1.0 + ((f32::min(p.abs() * 4.0, PI)).cos() + 1.0) * 0.5;
     let loc_z = 3.0;
     if sqr((r - 12.0) / 1.0) + sqr(pos.z / loc_z) > sqr(loc_r) { return 0; }
+
     let ll = self.lines.len() as f32;
 
-    let seg = (p + 0.5) * ll;
+    let seg = (p * 0.5 + 0.5) * ll;
     let (p, c, f) = if seg < 0.0 {
       (0, 0, 0.0)
     } else if seg < ll - 1.0 {
@@ -112,7 +119,7 @@ impl Knot5Creator {
     for i in 0 .. segp.len() {
       let cz = segp[i].0 + (segc[i].0 - segp[i].0) * f;
       let cr = segp[i].1 + (segc[i].1 - segp[i].1) * f;
-      let dst = sqr(z - cz) + sqr(rf - cr);
+      let dst = sqr(z - cz) + sqr(rf - cr) * 0.25;
       if dst < best {
         best = dst;
         index = i as PartIndex + 1;
