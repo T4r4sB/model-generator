@@ -62,7 +62,7 @@ impl GripshiftCreator {
   }
 
   pub fn get_quality() -> usize {
-    100
+    384
   }
 
   pub fn get_size() -> f32 {
@@ -106,7 +106,7 @@ impl GripshiftCreator {
       if pos.y.abs() > 3.0 && pos.z.abs() > 3.0 {
         if r > drum_min_r && x > min_x - 3.0 && x < min_x + 1.0 && r < drum_min_r + 2.0
           || x > min_x - 3.0 && x < min_x - 1.0 && r < drum_min_r + 2.0
-          || x > min_x - 19.0 && x < min_x - 1.0 && r < drum_min_r - 0.5
+          || x > min_x - 19.0 && x < min_x - 1.0 && r < drum_min_r + 0.5
         {
           return z_to_i(pos.z, false);
         }
