@@ -140,6 +140,7 @@ pub fn find_square(n1: Point, n2: Point) -> Point {
   mid + cross(mid, dn).scale(mid.len().recip())
 }
 
+#[derive(Debug, Clone, Copy)]
 pub struct FactorsForTriangle(pub f32, pub f32, pub f32);
 
 pub fn find_factors_for_triangle(d: f32, d1: f32, d2: f32) -> FactorsForTriangle {
