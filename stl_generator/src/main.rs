@@ -23,14 +23,11 @@ mod resources;
 #[macro_use]
 mod errors;
 
-mod zmey_gorynych_creator;
-type PartCreator = zmey_gorynych_creator::ZmeyGorynychCreator;
-
-//mod railroad_creator;
-//type PartCreator = railroad_creator::RailroadCreator;
-
 //mod sphere_creator;
 //type PartCreator = sphere_creator::SphereCreator;
+
+mod zmey_gorynych_curvy_copter_creator;
+type PartCreator = zmey_gorynych_curvy_copter_creator::ZmeyGorynychCurvyCopterCreator;
 
 fn generate_models() -> FxHashMap<PartIndex, Model> {
   let part_creator = PartCreator::new();
@@ -49,7 +46,7 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
   let mut total_square = 0.0;
 
   for i in 0..part_creator.faces() {
-    let mut contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
+    let (mut contours, _) = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
     let h = part_creator.get_height(i);
     let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
 
@@ -144,8 +141,8 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
   let mut sum_t_before = 0;
   let mut sum_t_after = 0;
 
- //models.clear();
- // models.insert(1, Model::cuboid(10, 10, 10, 10.0));
+  //models.clear();
+  // models.insert(1, Model::cuboid(10, 10, 10, 10.0));
 
   for (&m_index, m) in &mut models {
     sum_v += m.vertices.len();
@@ -160,13 +157,12 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
       }
     }
     sum_t_before += m.triangles.len();
-    if quality > 0 {
+    if quality >= 200 {
       println!("tcount before = {}", m.triangles.len());
 
-
-     //for m in m.clone().split_by_normal(0.9, 1.0) {
-     //   groups_of_models.insert(groups_of_models.len() as u32, m);
-    //  }
+      //for m in m.clone().split_by_normal(0.9, 1.0) {
+      //   groups_of_models.insert(groups_of_models.len() as u32, m);
+      //  }
 
       m.optimize(0.03, 1.0);
       println!("tcount after {}", m.triangles.len());
@@ -232,20 +228,63 @@ fn generate_models() -> FxHashMap<PartIndex, Model> {
   models
 }
 
+fn load_last_models(period: std::time::Duration) -> FxHashMap<PartIndex, Model> {
+  let path = std::path::Path::new("output");
+  let entries: Vec<_> = std::fs::read_dir(&path)
+    .unwrap()
+    .map(Result::unwrap)
+    .filter_map(|e| {
+      let name = e.file_name();
+      let name = name.to_str().unwrap();
+      let number: PartIndex = name.strip_prefix("output_")?.strip_suffix(".stl")?.parse().ok()?;
+      Some((e, number))
+    })
+    .collect();
+
+  let mut last_time = None;
+  for (e, _) in &entries {
+    let mod_time = e.metadata().unwrap().modified().unwrap();
+    if let Some(last_time) = &mut last_time {
+      *last_time = std::cmp::max(*last_time, mod_time);
+    } else {
+      last_time = Some(mod_time);
+    }
+  }
+
+  let mut result = FxHashMap::default();
+
+  let last_time = if let Some(last_time) = last_time { last_time } else { return result };
+
+  for (e, number) in &entries {
+    let mod_time = e.metadata().unwrap().modified().unwrap();
+    if mod_time + period > last_time {
+      let model = Model::load_from_stl(&path.join(&e.file_name())).unwrap();
+      result.insert(*number, model);
+    }
+  }
+
+  result
+}
+
 fn main() {
-  let mut models = generate_models();
+  let mut models;
+  if std::env::args().any(|s| s == "--load") {
+    models = load_last_models(std::time::Duration::from_mins(5));
+  } else {
+    models = generate_models();
+  }
 
   if let Err(_) = crate::gl_window::run(
-    "ОКНО С ПРИКОЛАМИ",
+    "test window",
     &mut models.iter().map(|(m_index, m)| {
       // println!("model {m_index} has {} vertices", m.vertices.len());
-      let color = match m_index / 10000 {
+      let color = match m_index / 100000 {
         1 => 0x00FF00,
         2 => 0xFF2000,
-        3 => 0xEEEEEE,
+        3 => 0xFFFF00,
         4 => 0x0080FF,
         5 => 0xFF8000,
-        6 => 0xFFFF00,
+        6 => 0xEEEEEE,
         7 => 0xFF00FF,
         8 => 0xFF80FF,
         _ => m_index.wrapping_mul(0x2743811) as u32 | 0x808080,

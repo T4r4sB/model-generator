@@ -538,7 +538,7 @@ impl Model {
 
         let gi = if nl { gleft } else { gright };
         if gi != u32::MAX && dot(ctx.ng.normal_of_g[gi as usize], nn) < 0.0 {
-            return false;
+          return false;
         }
 
         ctx.buf.t.push((cur, nt));
@@ -1012,6 +1012,32 @@ impl Model {
 
     stl_io::write_stl(&mut file, triangle_iter)
       .map_err(|e| format!("Failed to save stl to file {}: {}", path.to_string_lossy(), e))
+  }
+
+  pub fn load_from_stl(path: &std::path::Path) -> Result<Self, String> {
+    let mut file =
+      std::io::BufReader::new(std::fs::File::open(&path).map_err(|e| {
+        format!("Unable to open file {} for reading: {}", path.to_string_lossy(), e)
+      })?);
+
+    let stl = stl_io::read_stl(&mut file)
+      .map_err(|e| format!("Failed to load stl from file {}: {}", path.to_string_lossy(), e))?;
+
+    let mut result = Self::new();
+    for v in stl.vertices {
+      result.vertices.push(Point{x: v[0], y: v[1], z: v[2]});
+    }
+
+    result.triangles.reserve(stl.faces.len());
+    for t in stl.faces {
+      result.triangles.push([
+        t.vertices[0] as u32,
+        t.vertices[1] as u32,
+        t.vertices[2] as u32,
+      ]);
+    }
+
+    Ok(result)
   }
 
   pub fn cuboid(tx: usize, ty: usize, tz: usize, cell_size: f32) -> Self {
