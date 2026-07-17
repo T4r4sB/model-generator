@@ -23,11 +23,12 @@ pub struct ZmeyGorynychCurvyCopterCreator {
   axis2: Vec<Point>,
   normals: Vec<Point>,
   sz: f32,
+  groove_inner: Vec<f32>,
   groove: Vec<f32>,
   n_dists: RefCell<Vec<(f32, usize)>>,
   axis_pos: RefCell<Vec<(f32, Point)>>,
   axis_neg: RefCell<Vec<(f32, Point)>>,
-  centers: FxHashMap<PartIndex, Point>,
+  centers: FxHashMap<PartIndex, Vec<Point>>,
   extra_split: FxHashMap<PartIndex, Point>,
   extra_cuts: FxHashMap<PartIndex, Vec<Point>>,
   extra_cutsp: FxHashMap<PartIndex, Vec<Point>>,
@@ -83,7 +84,20 @@ impl ZmeyGorynychCurvyCopterCreator {
     let a_min = tc_min.acos();
     let a_max = c_max.acos() * 0.5;
 
+    let ia_max = c_min.acos() * 0.5;
+    let ia_min = ((edge * 2.0 + 1.0) / 3.0).sqrt().acos();
+
+    let ir = 4.0 / (ia_max - ia_min);
+    println!("ir={ir}");
+
     let r = 4.8 / f32::max(0.1, a_max - a_min);
+    let groove_inner = vec![
+      (ia_max + 3.0 / (r - 8.0)).cos(),
+      r - 7.8,
+      (ia_max + 0.0 / (r - 8.0)).cos(),
+      r - 5.4,
+      a_max.cos(),
+    ];
     let groove = vec![r - 3.0, a_max.cos(), r + 0.1, (a_max - 3.0 / r).cos(), r + 3.2, a_max.cos()];
     let sz = groove[groove.len() - 2] + 0.3;
     println!("r={r}, ta={}, sz={sz}", tac.acos().to_degrees());
@@ -123,10 +137,23 @@ impl ZmeyGorynychCurvyCopterCreator {
           }
 
           let center = a1.scale(cf.0) + a2.scale(cf.1) + cross(a1, a2).scale(cf.2);
+
+          let mut cn = (Point::ZERO, -f32::INFINITY);
+          for &n in &normals {
+            let ca = dot(center, n);
+            if ca > cn.1 {
+              cn = (n, ca);
+            }
+          }
+          let cn = cn.0;
+
           extra_split.insert(1 << i1 | 1 << i2 | 1 << i3, a3.rotate(center, PI));
           extra_split.insert(1 << i1 | 1 << i3, a3.rotate(center, ta * 2.0));
           extra_split.insert(1 << i2 | 1 << i3, a3.rotate(center, -ta * 2.0));
-          centers.insert(1 << i1 | 1 << i2 | 1 << i3 | 1 << axis.len(), center);
+          centers.insert(
+            1 << i1 | 1 << i2 | 1 << i3 | 1 << axis.len(),
+            vec![cn.rotate(center, PI * 0.5), cn.rotate(center, PI), cn.rotate(center, -PI * 0.5)],
+          );
 
           extra_cuts.insert(
             1 << i1 | 1 << i2 | 1 << i3 | 1 << axis.len(),
@@ -188,6 +215,7 @@ impl ZmeyGorynychCurvyCopterCreator {
       axis2,
       sz,
       normals,
+      groove_inner,
       groove,
       axis_pos,
       axis_neg,
@@ -223,13 +251,15 @@ impl ZmeyGorynychCurvyCopterCreator {
   pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
     if current_normal == 0 {
       self.get_part_index_impl(Point { x: pos.x, y: pos.y, z: 0.0 }, self.normals.len())
+    } else if current_normal == 1 {
+      self.get_part_index_impl(Point { x: pos.x, y: pos.y, z: self.sz - 9.5 }, self.normals.len())
     } else {
       0
     }
   }
 
   pub fn get_quality() -> usize {
-    120
+    320
   }
 
   pub fn get_size() -> f32 {
@@ -242,8 +272,11 @@ impl ZmeyGorynychCurvyCopterCreator {
       return 0;
     }
 
-    let sphere_r = self.groove[0] - 2.4;
+    if r > self.groove_inner[1] + 2.0 {
+      //  return 0;
+    }
 
+    let sphere_r = self.groove_inner[1] - 2.4;
     if r < sphere_r {
       for &a in &self.axis {
         let c = dot(pos, a) / r;
@@ -279,19 +312,25 @@ impl ZmeyGorynychCurvyCopterCreator {
 
     n_dists.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
     let out_r = 3.0;
-    if sqr(out_r - f32::min(n_dists[0].0, out_r))
-      + sqr(out_r - f32::min(n_dists[1].0, out_r))
-      + sqr(out_r - f32::min(n_dists[2].0, out_r))
-      > sqr(out_r)
-    {
+    let mut fd = out_r
+      - (sqr(out_r - f32::min(n_dists[0].0, out_r))
+        + sqr(out_r - f32::min(n_dists[1].0, out_r))
+        + sqr(out_r - f32::min(n_dists[2].0, out_r)))
+      .sqrt();
+
+    if fd < 0.0 {
       return 0;
     }
 
     let mut index: PartIndex = 0;
 
-    let (mut shift_out, mut shift_in, inter) = get_diag_groove(r, &self.groove);
+    let (mut shift_out, mut shift_in, inter);
 
-    let depth = self.groove[1] + 0.2 - r;
+    if r > self.groove[0] {
+      (shift_out, shift_in, inter) = get_diag_groove(r, &self.groove);
+    } else {
+      (shift_out, shift_in, inter) = get_groove(r, &self.groove_inner, 0.03);
+    }
 
     let mut axis_pos = self.axis_pos.borrow_mut();
     let axis_pos = axis_pos.deref_mut();
@@ -334,6 +373,10 @@ impl ZmeyGorynychCurvyCopterCreator {
       }
     }
 
+    if r < self.groove_inner[3] + 0.2 && index.count_ones() >= 3 && !self.corners.contains(&index) {
+      return 0;
+    }
+
     if let Some(cut) = self.extra_cuts.get(&index) {
       for cut in cut {
         let mut index2 = index;
@@ -352,8 +395,11 @@ impl ZmeyGorynychCurvyCopterCreator {
       }
     }
 
-    if let Some(center) = self.centers.get(&index) {
-      if r > sz {
+    if let Some(normals) = self.centers.get(&index) {
+      for &n in normals {
+        fd = f32::min(fd, sz - dot(pos, n));
+      }
+      if fd < 0.0 {
         return 0;
       }
     }
@@ -364,21 +410,30 @@ impl ZmeyGorynychCurvyCopterCreator {
       f32::min(0.2 + (r - self.groove[2]).abs() * 0.8 / 3.0, 1.0)
     };
 
-    let mut in_sr = |a: f32, b: f32| {
+    let mut in_sr = |a: f32, b: f32| -> f32 {
       let r = 0.03 * rr;
-      if a < r && b < r && sqr(r - a) + sqr(r - b) > sqr(r) {
-        return true;
+      if a < r && b < r {
+        return r - (sqr(r - a) + sqr(r - b)).sqrt();
       }
-      false
+      return f32::min(a, b);
     };
 
     axis_pos.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
     axis_neg.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
 
+    let mut cd = f32::INFINITY;
+    if axis_pos.len() >= 1 {
+      cd = f32::min(cd, axis_pos[0].0);
+    }
+    if axis_neg.len() >= 1 {
+      cd = f32::min(cd, axis_neg[0].0);
+    }
+
     for a1 in &*axis_pos {
       for a2 in &*axis_pos {
         if dot(a1.1, a2.1) < 0.8 {
-          if in_sr(a1.0, a2.0) {
+          cd = f32::min(cd, in_sr(a1.0, a2.0));
+          if cd < 0.0 {
             return 0;
           }
         }
@@ -387,7 +442,8 @@ impl ZmeyGorynychCurvyCopterCreator {
     for a1 in &*axis_neg {
       for a2 in &*axis_neg {
         if dot(a1.1, a2.1) < 0.8 {
-          if in_sr(a1.0, a2.0) {
+          cd = f32::min(cd, in_sr(a1.0, a2.0));
+          if cd < 0.0 {
             return 0;
           }
         }
@@ -396,8 +452,10 @@ impl ZmeyGorynychCurvyCopterCreator {
     if !inter {
       for a1 in &*axis_pos {
         for a2 in &*axis_neg {
-          if dot(a1.1, a2.1) > 0.0 {
-            if in_sr(a1.0, a2.0) {
+          let tan_case = r < self.groove_inner[3] - 0.2 && r > self.groove_inner[1] + 0.2;
+          if dot(a1.1, a2.1) > if tan_case { 0.2 } else { 0.0 } {
+            cd = f32::min(cd, in_sr(a1.0, a2.0));
+            if cd < 0.0 {
               return 0;
             }
           }
@@ -405,17 +463,51 @@ impl ZmeyGorynychCurvyCopterCreator {
       }
     }
 
+    cd *= 200.0;
+    if fd < out_r && cd < out_r && sqr(out_r - fd) + sqr(out_r - cd) > sqr(out_r) {
+      // return 0;
+    }
+
     if index.count_ones() == 1 || self.corners.contains(&index) {
-      if n_dists[0].0 < 1.7 {
-        if n_dists[0].0 + 0.2 * 0.5.sqrt() > n_dists[1].0 {
-          return 0;
+      if n_dists[0].0 < 3.7 {
+        let mut cp = f32::INFINITY;
+        cp = f32::min(
+          cp,
+          f32::max((n_dists[1].0 - 9.0).abs() - 4.5, (n_dists[2].0 - 9.0).abs() - 4.5),
+        );
+        if index.count_ones() == 1 {
+          let ma = axis_pos[0].1;
+          if dot(ma, self.normals[n_dists[0].1]) > dot(ma, self.normals[n_dists[1].1]) {
+            cp = f32::min(
+              cp,
+              f32::max((n_dists[1].0 - 10.0).abs() - 5.5, (n_dists[2].0 - sz).abs() - 3.5),
+            );
+            cp = f32::min(
+              cp,
+              f32::max((n_dists[1].0 - 6.5).abs() - 2.0, (n_dists[2].0 - sz).abs() - 6.5),
+            );
+          } else {
+            cp = f32::min(
+              cp,
+              f32::max((n_dists[1].0 - 6.5).abs() - 2.0, (n_dists[2].0 - sz).abs() - 2.5),
+            );
+          }
         }
-        if n_dists[0].0 < 1.4 {
-          index += 100000 * (n_dists[0].1 + 1) as PartIndex;
-        } else {
-          return 0;
+
+        if n_dists[0].0 < 1.7 || cp < 0.12 && n_dists[0].0 < 3.7 {
+          if n_dists[0].0 + 0.2 * 0.5.sqrt() > n_dists[1].0 {
+            return 0;
+          }
+
+          if n_dists[0].0 < 1.4 || cp < 0.0 && n_dists[0].0 < 3.4 {
+            index += 100000 * (n_dists[0].1 + 1) as PartIndex;
+          } else {
+            return 0;
+          }
         }
-      } else if index.count_ones() == 1 {
+      }
+
+      if index.count_ones() == 1 {
         let hole_r = if r < sphere_r + 2.0 { 1.5 } else { 3.2 };
         for (i, &a) in self.axis.iter().enumerate() {
           let c = dot(pos, a) / r;
