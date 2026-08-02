@@ -442,7 +442,11 @@ impl BeginnerJumblerCreator {
 
     if !side_check {
       let br = if index.count_ones() == 1 { self.groove[3] + 0.2 } else { self.groove[1] };
-      let pz = if index == 5 { -pos.z } else { pos.z };
+
+      let a = f32::atan2(pos.y, pos.x);
+      let a = (a * 11.0).cos();
+
+      let pz = if index == 5 { -pos.z - r * a * 0.05 } else { pos.z + r * a * 0.05 };
 
       for pp in [
         (20.0, -7.0),

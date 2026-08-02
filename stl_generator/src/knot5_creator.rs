@@ -74,7 +74,7 @@ impl Knot5Creator {
   }
 
   pub fn get_quality() -> usize {
-    100
+    200
   }
 
   pub fn get_size() -> f32 {
@@ -93,8 +93,8 @@ impl Knot5Creator {
   pub fn get_part_index(&self, mut pos: Point) -> PartIndex {
     let r = (sqr(pos.x) + sqr(pos.y)).sqrt();
     let p = f32::atan2(pos.y, pos.x);
-    let loc_r = 1.0 + ((f32::min(p.abs() * 4.0, PI)).cos() + 1.0) * 0.5;
-    let loc_z = 3.0;
+    let loc_r = 1.0 + ((f32::min(p.abs() * 2.0, PI)).cos() + 1.0) * 0.5; // радиус тора
+    let loc_z = 3.0; // эллиптичность тора в сечении
     if sqr((r - 12.0) / 1.0) + sqr(pos.z / loc_z) > sqr(loc_r) { return 0; }
 
     let ll = self.lines.len() as f32;

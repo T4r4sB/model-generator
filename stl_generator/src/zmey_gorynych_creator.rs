@@ -248,6 +248,8 @@ impl ZmeyGorynychCreator {
     let sz = f32::max(r0, r1) + 3.5;
     let gr = f32::min(r0, r1) - 3.0;
 
+    println!("sz={sz}");
+
     let groove0 = vec![
       gr,
       (max_angle0 - 0.0 / r0).cos(),
@@ -368,8 +370,11 @@ impl ZmeyGorynychCreator {
   }
 
   pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
-    let pt = Point { x: pos.x, y: pos.y, z: self.sz - 6.0 };
-    (self.get_part_index_impl(pt, current_normal) > 0) as PartIndex
+    if current_normal == 0 {
+      self.get_part_index_impl(Point { x: pos.x * 0.5.sqrt(), y: pos.x * 0.5.sqrt(), z: pos.y }, self.normals.len())
+    } else {
+      0
+    }
   }
 
   pub fn get_quality() -> usize {

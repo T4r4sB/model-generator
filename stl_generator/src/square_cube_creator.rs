@@ -188,7 +188,7 @@ impl SquareCubeCreator {
 
     let pin_factor = 0.35;
     for e in edges {
-      let da = 1.45 / (sz - 11.2);
+      let da = 1.35 / (sz - 11.2);
 
       let p = (e.0 + (e.1 - e.0).scale(pin_factor)).norm();
       let a = dot(p, a0).acos();
@@ -260,11 +260,15 @@ impl SquareCubeCreator {
       return 0;
     }
 
+    if pos.x < 2.999 || pos.y < -5.999 || pos.z <4.999 {
+   //   return 0;
+    }
+
     let sz = self.sz;
 
-    let sphere_or = self.groove[3] - 2.2;
+    let sphere_or = self.groove[3] - 2.2 + 1.0;
     let mut sphere_r = sphere_or;
-    let sphere_ir = self.groove[3] - 8.4;
+    let sphere_ir = self.groove[3] - 8.4 + 1.0;
 
     if r < sphere_r {
       if r > sphere_r - 4.0 {
@@ -272,7 +276,7 @@ impl SquareCubeCreator {
           let c = dot(pos, a);
           for trench in &self.trenchs {
             if c > trench.0 * r && c < trench.1 * r {
-              sphere_r = self.groove[3] - 4.2;
+              sphere_r = self.groove[3] - 4.2 + 1.0;
             }
           }
         }
@@ -281,7 +285,7 @@ impl SquareCubeCreator {
           let c = dot(pos, a);
           let s = cross(pos, a).len();
           if c > 0.0 && s < 6.4 {
-            sphere_r = self.groove[3] - 6.2;
+            sphere_r = self.groove[3] - 6.2 + 1.0;
           }
         }
       }
@@ -308,7 +312,7 @@ impl SquareCubeCreator {
       }
     }
 
-    //return 0;
+    return 0;
 
     let mut dists = [(f32::INFINITY, 0); 6];
     for (i, n) in self.normals.iter().enumerate() {
@@ -457,6 +461,8 @@ impl SquareCubeCreator {
     if r < self.groove[3] - 1.8 || index.count_ones() > 3 && r < self.groove[5] + 0.2 {
       return 0;
     }
+
+    if index.count_ones() > 3 { return 0; }
 
     axis_pos.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
     axis_neg.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());

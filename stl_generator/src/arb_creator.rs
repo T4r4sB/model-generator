@@ -11,7 +11,10 @@ use std::ops::DerefMut;
 
 const PI: f32 = std::f32::consts::PI;
 
-const RHOMDO : bool = false;
+pub fn reflect(p: Point, a: Point, b: Point) -> Point {
+  let c = cross(a, b).norm();
+  p - c.scale(2.0 * dot(p, c))
+}
 
 #[derive(Debug, Default, Clone)]
 struct NearAxis {
@@ -19,10 +22,11 @@ struct NearAxis {
   pos: Point,
 }
 
-pub struct ZmeyGorynychCurvyCopterCreator {
+pub struct ArbCreator {
   axis: Vec<Point>,
   axis1: Vec<Point>,
   axis2: Vec<Point>,
+  extra_split: FxHashMap<PartIndex, Vec<Point>>,
   normals: Vec<Point>,
   sz: f32,
   groove_inner: Vec<f32>,
@@ -30,34 +34,28 @@ pub struct ZmeyGorynychCurvyCopterCreator {
   n_dists: RefCell<Vec<(f32, usize)>>,
   axis_pos: RefCell<Vec<(f32, Point)>>,
   axis_neg: RefCell<Vec<(f32, Point)>>,
-  centers: FxHashMap<PartIndex, Vec<Point>>,
-  extra_split: FxHashMap<PartIndex, Point>,
-  extra_cuts: FxHashMap<PartIndex, Vec<Point>>,
-  extra_cutsp: FxHashMap<PartIndex, Vec<Point>>,
-  corners: FxHashSet<PartIndex>,
 }
 
 pub fn sqr(x: f32) -> f32 {
   x * x
 }
-impl ZmeyGorynychCurvyCopterCreator {
+impl ArbCreator {
   pub fn new() -> Self {
-    let u = 1.0;
-    let v = 0.85;
+    let u = 0.28077640640441508;
+    let cu2 = ((u+1.0)*0.5).sqrt();
+    let su2 = (1.0 - sqr(cu2)).sqrt();
+    let ch = u/cu2;
+    let sh = (1.0-sqr(ch)).sqrt();
 
     let mut axis: Vec<_> = [
-      Point { x: 0.0, y: -u, z: -v },
-      Point { x: 0.0, y: -u, z: v },
-      Point { x: 0.0, y: u, z: -v },
-      Point { x: 0.0, y: u, z: v },
-      Point { x: -v, y: 0.0, z: -u },
-      Point { x: v, y: 0.0, z: -u },
-      Point { x: -v, y: 0.0, z: u },
-      Point { x: v, y: 0.0, z: u },
-      Point { x: -u, y: -v, z: 0.0 },
-      Point { x: -u, y: v, z: 0.0 },
-      Point { x: u, y: -v, z: 0.0 },
-      Point { x: u, y: v, z: 0.0 },
+      Point { x: 0.0, y: su2, z: cu2 },
+      Point { x: 0.0, y: -su2, z: cu2 },
+      Point { x: sh, y: 0.0, z: ch },
+      Point { x: -sh, y: 0.0, z: ch },
+      Point { x: su2, y: 0.0, z: -cu2 },
+      Point { x: -su2, y: 0.0, z: -cu2 },
+      Point { x: 0.0, y: sh, z: -ch },
+      Point { x: 0.0, y: -sh, z: -ch },
     ]
     .into_iter()
     .map(Point::norm)
@@ -73,41 +71,14 @@ impl ZmeyGorynychCurvyCopterCreator {
     ]
     .into_iter()
     .map(Point::norm)
+    .map(|p| p.rotate(Point::Z, PI*0.25))
     .collect();
 
-    let c_min = dot(axis[0], axis[1]);
-    let c_max = dot(axis[0], axis[2]);
-    let edge = dot(axis[0], axis[4]);
+    let c_min = dot(axis[2], axis[6]);
+    let c_max = dot(axis[0], axis[4]);
+    let edge = dot(axis[0], axis[1]);
 
-    if RHOMDO {
-      let cc = Point { x: 1.0, y: 1.0, z: 1.0 }.norm();
-      let da;
-      {
-        let d2a = dot(cc, axis[1]);
-        let d2b = dot(cc, axis[3]);
-        da = ((edge - d2a * d2b) / (1.0 - sqr(d2a)).sqrt() / (1.0 - sqr(d2b)).sqrt()).acos();
-      }
-      for a in &mut axis {
-        if dot(*a, cc) < -0.5 {
-          *a = a.rotate(cc, -da * 2.0);
-        }
-      }
-
-      let da2;
-      {
-        let sq2 = (axis[0] + axis[1] + axis[8] + axis[6]).norm();
-        let a = dot(cc, sq2);
-        let b = dot(cc, normals[0]);
-        let c = dot(sq2, normals[0]);
-        da2 = ((c - a * b) / (1.0 - sqr(a)).sqrt() / (1.0 - sqr(b)).sqrt()).acos();
-      }
-
-      for n in &mut normals {
-        if dot(*n, cc) < -0.0 {
-          *n = n.rotate(cc, da2);
-        }
-      }
-    }
+   // normals = axis.clone();
 
     let tmme = (c_min - sqr(edge)) / (1.0 - sqr(edge));
     let tac = (-tmme - 1.0 + (1.0 - tmme) * edge) * 0.5;
@@ -123,7 +94,7 @@ impl ZmeyGorynychCurvyCopterCreator {
     let ir = 4.0 / (ia_max - ia_min);
     println!("ir={ir}");
 
-    let r = 4.8 / f32::max(0.1, a_max - a_min);
+    let r = f32::max(24.0, 4.8 / f32::max(0.1, a_max - a_min));
     let groove_inner = vec![
       (ia_max + 3.0 / (r - 8.0)).cos(),
       r - 7.8,
@@ -147,77 +118,9 @@ impl ZmeyGorynychCurvyCopterCreator {
     let cf = find_factors_for_triangle(c_min, tc_min, tc_min);
     println!("cf={cf:?}");
 
-    let mut extra_split = FxHashMap::default();
-    let mut extra_cuts = FxHashMap::default();
-    let mut extra_cutsp = FxHashMap::default();
-    let mut centers = FxHashMap::default();
-    let mut corners = FxHashSet::default();
-    for i1 in 0..axis.len() {
-      let a1 = axis[i1];
-      for i2 in 0..axis.len() {
-        let a2 = axis[i2];
-        if (dot(a1, a2) - c_min).abs() > 0.001 {
-          continue;
-        }
+    let mut extra_split = FxHashMap::<_, Vec<_>>::default();
 
-        for i3 in 0..axis.len() {
-          let a3 = axis[i3];
-          if (dot(a1, a3) - edge).abs() > 0.001
-            || (dot(a2, a3) - edge).abs() > 0.001
-            || dot(a3, cross(a1, a2)) < 0.0
-          {
-            continue;
-          }
-
-          let center = a1.scale(cf.0) + a2.scale(cf.1) + cross(a1, a2).scale(cf.2);
-
-          let mut cn = (Point::ZERO, -f32::INFINITY);
-          for &n in &normals {
-            let ca = dot(center, n);
-            if ca > cn.1 {
-              cn = (n, ca);
-            }
-          }
-          let cn = cn.0;
-
-          extra_split.insert(1 << i1 | 1 << i2 | 1 << i3, a3.rotate(center, PI));
-          extra_split.insert(1 << i1 | 1 << i3, a3.rotate(center, ta * 2.0));
-          extra_split.insert(1 << i2 | 1 << i3, a3.rotate(center, -ta * 2.0));
-          centers.insert(
-            1 << i1 | 1 << i2 | 1 << i3 | 1 << axis.len(),
-            vec![cn.rotate(center, PI * 0.5), cn.rotate(center, PI), cn.rotate(center, -PI * 0.5)],
-          );
-
-          extra_cuts.insert(
-            1 << i1 | 1 << i2 | 1 << i3 | 1 << axis.len(),
-            vec![
-              a3.rotate(center, ta - PI * 0.5),
-              a3.rotate(center, PI * 0.5 - ta),
-              a3.rotate(center, -ta - PI * 0.5),
-              a3.rotate(center, PI * 0.5 + ta),
-              a3.rotate(center, PI * 0.5),
-              a3.rotate(center, -PI * 0.5),
-              a3.rotate(center, PI - ta),
-              a3.rotate(center, PI + ta),
-            ],
-          );
-
-          extra_cutsp.insert(
-            1 << i1 | 1 << i2 | 1 << i3,
-            vec![a3.rotate(center, ta * 2.0), a3.rotate(center, -ta * 2.0)],
-          );
-          extra_cutsp.insert(
-            1 << i1 | 1 << i3 | 1 << axis.len(),
-            vec![a1.rotate(center, PI), a1.rotate(center, ta * 2.0)],
-          );
-          extra_cutsp.insert(
-            1 << i2 | 1 << i3 | 1 << axis.len(),
-            vec![a2.rotate(center, PI), a2.rotate(center, -ta * 2.0)],
-          );
-        }
-      }
-    }
-
+    let cf = find_factors_for_triangle(edge, edge, edge);
     for i1 in 0..axis.len() {
       let a1 = axis[i1];
       for i2 in 0..axis.len() {
@@ -225,6 +128,8 @@ impl ZmeyGorynychCurvyCopterCreator {
         if (dot(a1, a2) - edge).abs() > 0.001 {
           continue;
         }
+
+        let mut has = false;
         for i3 in 0..axis.len() {
           let a3 = axis[i3];
           if (dot(a1, a3) - edge).abs() > 0.001
@@ -233,8 +138,13 @@ impl ZmeyGorynychCurvyCopterCreator {
           {
             continue;
           }
+          has = true;
+          break;
+        }
 
-          corners.insert(1 << i1 | 1 << i2 | 1 << i3);
+        if !has {
+          let a3 = a1.scale(cf.0) + a2.scale(cf.1) + cross(a1, a2).scale(cf.2);
+          extra_split.entry(1 << i1 | 1 << i2).or_default().push(a3);
         }
       }
     }
@@ -247,17 +157,13 @@ impl ZmeyGorynychCurvyCopterCreator {
       axis1,
       axis2,
       sz,
+      extra_split,
       normals,
       groove_inner,
       groove,
       axis_pos,
       axis_neg,
       n_dists,
-      extra_split,
-      extra_cuts,
-      extra_cutsp,
-      centers,
-      corners,
     }
   }
 
@@ -292,14 +198,14 @@ impl ZmeyGorynychCurvyCopterCreator {
   }
 
   pub fn get_quality() -> usize {
-    80
+    200
   }
 
   pub fn get_size() -> f32 {
     100.0
   }
 
-  pub fn get_part_index_impl(&self, pos: Point, current_normal: usize) -> PartIndex {
+  pub fn get_part_index_impl(&self, mut pos: Point, current_normal: usize) -> PartIndex {
     let r = pos.len();
     if pos.x.abs() > 49.999 || pos.y.abs() > 49.999 || pos.z.abs() > 49.999 {
       return 0;
@@ -318,7 +224,7 @@ impl ZmeyGorynychCurvyCopterCreator {
           return 0;
         }
       }
-      return 6;
+      return 31;
     }
 
     let mut out_core = false;
@@ -329,8 +235,8 @@ impl ZmeyGorynychCurvyCopterCreator {
     let n_dists: &mut _ = n_dists.deref_mut();
 
     let n_dist = |n: Point| {
-      //let r = 80.0;
-      //r - (pos - n.scale(sz - r)).len()
+      // let r = 80.0;
+      // r - (pos - n.scale(sz - r)).len()
       sz - dot(pos, n)
     };
 
@@ -350,7 +256,7 @@ impl ZmeyGorynychCurvyCopterCreator {
     }
 
     n_dists.sort_by(|(a, _), (b, _)| a.partial_cmp(b).unwrap());
-    let out_r = 3.0;
+    let out_r = 1.5;
     let mut fd = out_r
       - (sqr(out_r - f32::min(n_dists[0].0, out_r))
         + sqr(out_r - f32::min(n_dists[1].0, out_r))
@@ -406,41 +312,16 @@ impl ZmeyGorynychCurvyCopterCreator {
       }
     }
 
-    if let Some(split) = self.extra_split.get(&index) {
-      if !match_axis(&mut index, *split, self.axis.len()) {
-        return 0;
+    if let Some(splits) = self.extra_split.get(&index) {
+      for (i, split) in splits.iter().enumerate() {
+        if !match_axis(&mut index, *split, self.axis.len() + i) {
+          return 0;
+        }
       }
     }
 
-    if r < self.groove_inner[3] + 0.2 && index.count_ones() >= 3 && !self.corners.contains(&index) {
+    if r < self.groove_inner[3] + 0.2 && index.count_ones() > 3 {
       return 0;
-    }
-
-    if let Some(cut) = self.extra_cuts.get(&index) {
-      for cut in cut {
-        let mut index2 = index;
-        if !match_axis(&mut index2, *cut, self.axis.len() + 1) || index2 == index {
-          return 0;
-        }
-      }
-    }
-
-    if let Some(cut) = self.extra_cutsp.get(&index) {
-      for cut in cut {
-        let mut index2 = index;
-        if !match_axis(&mut index2, *cut, self.axis.len() + 1) || index2 != index {
-          return 0;
-        }
-      }
-    }
-
-    if let Some(normals) = self.centers.get(&index) {
-      for &n in normals {
-        fd = f32::min(fd, n_dist(n));
-      }
-      if fd < 0.0 {
-        return 0;
-      }
     }
 
     let rr = if index.count_ones() < 3 {
@@ -507,12 +388,12 @@ impl ZmeyGorynychCurvyCopterCreator {
       // return 0;
     }
 
-    if index.count_ones() <= 1 || self.corners.contains(&index) {
+    if index.count_ones() <= 3 {
       if n_dists[0].0 < 3.7 {
         let mut cp = f32::INFINITY;
         cp = f32::min(
           cp,
-          f32::max((n_dists[1].0 - 9.0).abs() - 4.5, (n_dists[2].0 - 9.0).abs() - 4.5),
+          f32::max((n_dists[1].0 - 6.0).abs() - 1.5, (n_dists[2].0 - 6.0).abs() - 1.5),
         );
         if index.count_ones() == 1 {
           let ma = axis_pos[0].1;
