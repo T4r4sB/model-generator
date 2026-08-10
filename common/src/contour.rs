@@ -4,29 +4,24 @@ use dxf::entities::*;
 use dxf::objects::*;
 use fxhash::FxHashMap;
 use std::collections::HashMap;
+use std::default;
 
 pub type PartIndex = u32;
-pub const BAD_INDEX: PartIndex = 0xFFFFFFFF;
+pub const BAD_INDEX: PartIndex = PartIndex::MAX;
+pub const BAD_VERTEX: usize = usize::MAX;
+pub const BAD_ORD: usize = usize::MAX;
+pub const BAD_EDGE: usize = usize::MAX;
 
 #[derive(Debug, Clone)]
 pub struct Contour {
-  pub points: Vec<u32>,
+  pub points: Vec<usize>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ConnectedPart {
-  pub contours: Vec<Contour>,
-}
+pub type Triangle = [usize; 3];
 
-#[derive(Debug, Clone)]
-pub struct FragmentedParts {
-  pub contours: Vec<Contour>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ContourSet {
-  pub points: Vec<Point>,
-  pub parts: Vec<ConnectedPart>,
+#[derive(Debug, Clone, Default)]
+pub struct Contours {
+  contours: Vec<Contour>,
 }
 
 impl Contour {
@@ -71,528 +66,17 @@ impl Contour {
 
     result
   }
-
-  pub fn contains(&self, points: &[Point], p: Point) -> bool {
-    if self.points.is_empty() {
-      return false;
-    }
-    let mut c_in = 0;
-    let mut c_out = 0;
-    let mut prev = self.get(points, self.points.len() - 1) - p;
-    for i in 0..self.points.len() {
-      let cur = self.get(points, i) - p;
-      if prev.y >= 0.0 && cur.y < 0.0 && cross(prev, cur) <= 0.0 {
-        c_in += 1;
-      } else if prev.y < 0.0 && cur.y >= 0.0 && cross(prev, cur) > 0.0 {
-        c_out += 1;
-      }
-      prev = cur;
-    }
-    c_in < c_out
-  }
-
-  pub fn contains_inner(&self, points: &[Point], pi: u32) -> bool {
-    self.contains(points, points[pi as usize])
-  }
-
-  pub fn split_to_triangles_if_convex(self, points: &[Point]) -> Vec<ConnectedPart> {
-    if self.points.len() < 3 {
-      return vec![];
-    }
-
-    if self.points.len() == 3 {
-      return vec![ConnectedPart { contours: vec![self] }];
-    }
-
-    // same logic with bad-angle and splic, but lighter
-
-    let pprev = self.get(points, self.points.len() - 2);
-    let mut prev = self.get(points, self.points.len() - 1);
-    let mut prev_prev_i = self.points.len() - 1;
-    let mut prev_i = self.points.len() - 1;
-    let mut prev_delta = prev - pprev;
-
-    let mut worst_angle = (0, 0, 0, Point::ZERO, f32::NEG_INFINITY);
-    for i in 0..self.points.len() {
-      let cur = self.get(points, i);
-      let delta = cur - prev;
-      let cr = cross(delta, prev_delta);
-      if cr > worst_angle.4 {
-        worst_angle = (prev_prev_i, prev_i, i, -delta.perp() - prev_delta.perp(), cr);
-      }
-
-      prev_delta = delta;
-      prev = cur;
-      prev_prev_i = prev_i;
-      prev_i = i;
-    }
-
-    let mut farest_angle = (0, f32::NEG_INFINITY);
-    for i in 0..self.points.len() {
-      if i == worst_angle.0 || i == worst_angle.1 || i == worst_angle.2 {
-        continue;
-      }
-      let cur = self.get(points, i);
-      let d = dot(cur, worst_angle.3);
-      if d > farest_angle.1 {
-        farest_angle = (i, d);
-      }
-    }
-
-    let i1 = worst_angle.1;
-    let i2 = farest_angle.0;
-    let (i1, i2) = if i1 < i2 { (i1, i2) } else { (i2, i1) };
-    let c1 = Contour { points: self.points[i1..=i2].to_owned() };
-    let c2 = Contour { points: [&self.points[i2..], &self.points[..=i1]].concat() };
-    let mut lhs = c1.split_to_triangles_if_convex(points);
-    let rhs = c2.split_to_triangles_if_convex(points);
-    lhs.extend(rhs);
-    lhs
-  }
-
-  pub fn optimize(&mut self, points: &[Point], eps: f32) {
-    let ok = |i1: usize, i2: usize| {
-      if i1 == i2 {
-        return false;
-      }
-      let mut i = i1;
-      loop {
-        i += 1;
-        if i == self.points.len() {
-          i = 0;
-        }
-        if i == i2 {
-          return true;
-        }
-        if dist_pl(self.get(points, i), self.get(points, i1), self.get(points, i2)) > eps {
-          return false;
-        }
-      }
-    };
-
-    let mut v = Vec::<(usize, usize)>::with_capacity(self.points.len()); // point index, next
-
-    for i in 0..self.points.len() - 1 {
-      v.push((i, i + 1));
-    }
-    v.push((self.points.len() - 1, 0));
-    let mut i = 0;
-    let mut ni = v[i].1;
-    let mut nni = v[ni].1;
-    let mut lv: Option<usize> = None;
-    loop {
-      let next = v[nni].1;
-      if i == next {
-        break;
-      }
-      if ok(i, nni) {
-        v[i].1 = nni;
-        lv = None;
-      } else {
-        i = ni;
-        if lv == Some(i) {
-          break;
-        }
-        lv = lv.or(Some(i));
-      }
-      ni = nni;
-      nni = next;
-    }
-
-    let si = i;
-    let mut fixed_points = Vec::new();
-    loop {
-      fixed_points.push(self.points[v[i].0]);
-      i = v[i].1;
-      if i == si {
-        break;
-      }
-    }
-    self.points = fixed_points;
-  }
-
-  fn find_bad_angle(&self, points: &[Point]) -> Option<usize> {
-    if self.points.len() < 3 {
-      return None;
-    }
-
-    let mut prev_prev_i = self.points.len() - 2;
-    let pprev = self.get(points, prev_prev_i);
-    let mut prev_i = self.points.len() - 1;
-    let mut prev = self.get(points, prev_i);
-
-    let mut prev_delta = prev - pprev;
-
-    let mut result = None;
-    let mut change = true;
-
-    for i in 0..self.points.len() {
-      let cur = self.get(points, i);
-      let delta = cur - prev;
-
-      let bad;
-
-      if self.points[prev_prev_i] == self.points[i] {
-        // Hateful "hair" case
-        let mut c2 = self.points[prev_prev_i];
-        let mut c1 = self.points[prev_i];
-        let mut j1 = prev_prev_i;
-        let mut j2 = i;
-        loop {
-          j1 = if j1 == 0 { self.points.len() - 1 } else { j1 - 1 };
-          j2 = if j2 == self.points.len() - 1 { 0 } else { j2 + 1 };
-          let pt1 = self.points[j1];
-          let pt2 = self.points[j2];
-          if pt1 == pt2 {
-            c2 = c1;
-            c1 = pt1;
-            continue;
-          }
-
-          let coo0 = points[c2 as usize];
-          let coo1 = points[c1 as usize] - coo0;
-          let coo2 = points[pt1 as usize] - coo0;
-          let coo3 = points[pt2 as usize] - coo0;
-
-          bad = (cross(coo1, coo2) > 0.0) as i32
-            + (cross(coo2, coo3) > 0.0) as i32
-            + (cross(coo3, coo1) > 0.0) as i32
-            >= 2;
-          break;
-        }
-      } else {
-        bad = cross(delta, prev_delta) > 0.0;
-      }
-
-      if bad {
-        if change {
-          // try to get "middle" bad angle
-          result = Some(prev_i);
-        }
-        change = !change;
-      }
-
-      prev_delta = delta;
-      prev = cur;
-      prev_prev_i = prev_i;
-      prev_i = i;
-    }
-
-    result
-  }
 }
 
-impl ConnectedPart {
-  pub fn new() -> Self {
-    Self { contours: Vec::new() }
-  }
-
-  pub fn points_count(&self) -> usize {
-    let mut result = 0;
-    for c in &self.contours {
-      result += c.points.len();
-    }
-    result
-  }
-
-  pub fn optimize(&mut self, points: &[Point], eps: f32) {
-    for c in &mut self.contours {
-      c.optimize(points, eps)
-    }
-  }
-
-  pub fn merge(&mut self, other: Self) {
-    self.contours.extend(other.contours)
-  }
-
-  pub fn remove_trash(&mut self, points: &[Point]) {
-    self.contours.retain(|c| {
-      let sq = c.get_square(points);
-      sq < -1.0 || sq > 1.0
-    })
-  }
-
-  fn split_by(mut self, points: &[Point], c1: usize, p1: usize, c2: usize, p2: usize) -> Vec<Self> {
-    if c1 == c2 {
-      let src = &self.contours[c1].points;
-      let (p1, p2) = if p1 < p2 { (p1, p2) } else { (p2, p1) };
-      let new_c1 = Contour { points: src[p1..=p2].to_vec() };
-      let new_c2 = Contour { points: [&src[p2..], &src[..=p1]].concat() };
-      assert!(new_c1.points.len() > 2);
-      assert!(new_c2.points.len() > 2);
-
-      let fragmented_parts = FragmentedParts {
-        contours: [&self.contours[..c1], &[new_c1, new_c2], &self.contours[c2 + 1..]].concat(),
-      };
-
-      fragmented_parts.split_to_connected_areas(points)
-    } else {
-      let src1 = &self.contours[c1].points;
-      let src2 = &self.contours[c2].points;
-      let new_c =
-        Contour { points: [&src1[..=p1], &src2[p2..], &src2[..=p2], &src1[p1..]].concat() };
-      let (c1, c2) = if c1 < c2 { (c1, c2) } else { (c2, c1) };
-      self.contours =
-        [&self.contours[..c1], &self.contours[c1 + 1..c2], &self.contours[c2 + 1..], &[new_c]]
-          .concat();
-      // here we dont create new connected parts
-      vec![self]
-    }
-  }
-
-  fn find_bad_angle(&self, points: &[Point]) -> Option<(usize, usize)> {
-    for ci in 0..self.contours.len() {
-      if let Some(i) = self.contours[ci].find_bad_angle(points) {
-        return Some((ci, i));
-      }
-    }
-    None
-  }
-
-  fn get(&self, points: &[Point], c: usize, i: usize) -> Point {
-    self.contours[c].get(points, i)
-  }
-
-  fn find_pair_for_bad_angle(&self, points: &[Point], c: usize, p: usize) -> (usize, usize) {
-    self.find_pair_for_bad_angle_impl(points, c, p, false)
-  }
-
-  fn find_pair_for_bad_angle_impl(
-    &self,
-    points: &[Point],
-    c: usize,
-    p: usize,
-    diagnostic: bool,
-  ) -> (usize, usize) {
-    const EPS: f32 = 1.0e-6;
-    let ps0 = &self.contours[c];
-    let p_base = ps0.get(points, p);
-    let p1 = ps0.get(points, if p == 0 { ps0.points.len() - 1 } else { p - 1 }) - p_base;
-    let p2 = ps0.get(points, if p == ps0.points.len() - 1 { 0 } else { p + 1 }) - p_base;
-
-    let bisect = p1.norm().perp() - p2.norm().perp() - p1.norm() - p2.norm();
-
-    // Stage1: find possible points
-    let mut candidates = Vec::new();
-
-    for ci in 0..self.contours.len() {
-      let cp = &self.contours[ci];
-      let prev_prev_i = cp.points.len() - 2;
-      let mut prev_i = cp.points.len() - 1;
-      let mut prev_prev = cp.get(points, prev_prev_i) - p_base;
-      let mut prev = cp.get(points, prev_i) - p_base;
-      for i in 0..cp.points.len() {
-        let pi = cp.get(points, i) - p_base;
-
-        if cross(prev, p1) > EPS || cross(p2, prev) > EPS {
-          let cr1 = cross(prev_prev, prev);
-          let cr2 = cross(prev, pi);
-          let sq = cross(prev_prev - prev, pi - prev);
-
-          if (cr1 > EPS) as i32 + (cr2 > EPS) as i32 + (sq > EPS) as i32 >= 2 {
-            candidates.push((ci, prev_i));
-          }
-        }
-
-        prev_prev = prev;
-        prev = pi;
-        prev_i = i;
-      }
-    }
-    if candidates.is_empty() {
-      let fail = ContourSet { points: points.to_owned(), parts: vec![self.clone()] };
-      let _ = fail.save_to_dxf(std::path::Path::new("fail.dxf"));
-    }
-    assert!(!candidates.is_empty());
-    let cache: FxHashMap<_, f32> = candidates
-      .iter()
-      .map(|&(c, p)| {
-        let pt = self.contours[c].get(points, p) - p_base;
-        ((c, p), (cross(bisect, pt) / dot(bisect, pt)).abs())
-      })
-      .collect();
-
-    candidates
-      .sort_by(|k1, k2| cache.get(k1).unwrap().partial_cmp(cache.get(k2).unwrap()).unwrap());
-
-    if diagnostic {
-      println!("candidates={:?}", candidates);
-      println!("cache={:?}", cache);
-    }
-
-    let mut intersectors = FxHashMap::default();
-
-    // Stage2: check candidates
-    'check_candidates: for (c, i) in candidates {
-      let control = self.contours[c].get(points, i);
-
-      fn intersect(p1: Point, p2: Point, p3: Point, p4: Point) -> bool {
-        let cr1 = cross(p1 - p4, p3 - p4);
-        let cr2 = cross(p2 - p4, p3 - p4);
-        if cr1 < 0.0 && cr2 > 0.0 || cr1 > 0.0 && cr2 < 0.0 {
-          let cr3 = cross(p3 - p2, p1 - p2);
-          let cr4 = cross(p4 - p2, p1 - p2);
-          if cr3 <= 0.0 && cr4 >= 0.0 || cr3 >= 0.0 && cr4 <= 0.0 {
-            return true;
-          }
-        }
-        return false;
-      }
-
-      for (_, &(prev, cur)) in &intersectors {
-        if intersect(p_base, control, prev, cur) {
-          continue 'check_candidates;
-        }
-      }
-
-      for ci in 0..self.contours.len() {
-        let cp = &self.contours[ci];
-        let mut prev = cp.get(points, cp.points.len() - 1);
-        for i in 0..cp.points.len() {
-          let cur = cp.get(points, i);
-          if intersectors.contains_key(&(ci, i)) {
-            continue;
-          }
-
-          if intersect(p_base, control, prev, cur) {
-            // bad
-            if diagnostic {
-              println!("failed with {}:{}", ci, i);
-            }
-            intersectors.insert((ci, i), (prev, cur));
-            continue 'check_candidates;
-          }
-
-          prev = cur;
-        }
-      }
-
-      return (c, i);
-    }
-
-    panic!("All candidates are wrong!");
-  }
-
-  pub fn split_to_triangles_if_convex(self, points: &[Point]) -> Vec<ConnectedPart> {
-    let mut result = Vec::new();
-    for c in self.contours {
-      result.extend(c.split_to_triangles_if_convex(points));
-    }
-    result
-  }
-
-  pub fn split_to_triangles(self, points: &[Point]) -> Vec<ConnectedPart> {
-    self.split_to_triangles_impl(points, false)
-  }
-
-  pub fn split_to_triangles_impl(self, points: &[Point], diagnostic: bool) -> Vec<ConnectedPart> {
-    let mut result_before = vec![self];
-    let mut result_after = Vec::new();
-
-    let mut output = Vec::new();
-    let mut iter = 0;
-    loop {
-      if diagnostic {
-        let to_save = ContourSet { points: points.to_owned(), parts: result_before.clone() };
-        println!("results_before={:?}", result_before);
-        let _ = to_save.save_to_dxf(std::path::Path::new(&format!("split_{}.dxf", iter)));
-        if iter == 202 {
-          return vec![];
-        };
-        iter += 1;
-        println!("iter={}", iter);
-      }
-
-      for r in result_before {
-        if let Some((c, i)) = r.find_bad_angle(points) {
-          let (c2, i2) = r.find_pair_for_bad_angle_impl(points, c, i, diagnostic);
-          result_after.extend(r.split_by(points, c, i, c2, i2));
-        } else {
-          output.extend(r.split_to_triangles_if_convex(points));
-        }
-      }
-
-      if result_after.is_empty() {
-        break;
-      }
-      result_before = std::mem::take(&mut result_after);
-    }
-
-    output
-  }
-
-  pub fn extrude(&self, points: &[Point], width: f32) -> crate::model::Model {
-    let mut points_3d = Vec::with_capacity(points.len() * 2);
-    for &p in points {
-      points_3d.push(crate::points3d::Point { x: p.x, y: p.y, z: 0.0 });
-      points_3d.push(crate::points3d::Point { x: p.x, y: p.y, z: width });
-    }
-
-    let mut triangles = Vec::with_capacity(points.len() * 4);
-    for c in &self.contours {
-      let mut prev = c.points[c.points.len() - 1];
-      for &p in &c.points {
-        triangles.push([prev * 2, p * 2, p * 2 + 1]);
-        triangles.push([prev * 2, p * 2 + 1, prev * 2 + 1]);
-        prev = p;
-      }
-    }
-
-    for t in self.clone().split_to_triangles(points) {
-      for c in t.contours {
-        assert!(c.points.len() == 3);
-        triangles.push([c.points[2] * 2, c.points[1] * 2, c.points[0] * 2]);
-        triangles.push([c.points[0] * 2 + 1, c.points[1] * 2 + 1, c.points[2] * 2 + 1]);
-      }
-    }
-
-    crate::model::Model { vertices: points_3d, triangles }
-  }
-
-  pub fn get_square(&self, points: &[Point]) -> f32 {
-    let mut result = 0.0;
-    for c in &self.contours {
-      result += c.get_square(points)
-    }
-    result
-  }
-
-  pub fn get_length(&self, points: &[Point]) -> f32 {
-    let mut result = 0.0;
-    for c in &self.contours {
-      result += c.get_length(points)
-    }
-    result
-  }
-
-  pub fn contains(&self, points: &[Point], p: Point) -> bool {
-    for c in &self.contours {
-      if !c.contains(points, p) {
-        return false;
-      }
-    }
-    true
-  }
-
-  pub fn get_aabb(&self, points: &[Point]) -> AABB {
-    let mut result = AABB::empty();
-    for c in &self.contours {
-      for &p in &c.points {
-        result = result.with(points[p as usize]);
-      }
-    }
-    result
-  }
-}
-
-impl ContourSet {
-  pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
-    self.save_to_dxf_with_grid(path, false)
+impl Contours {
+  pub fn save_to_dxf(&self, path: &std::path::Path, points: &[Point]) -> Result<(), String> {
+    self.save_to_dxf_with_grid(path, points, false)
   }
 
   pub fn save_to_dxf_with_grid(
     &self,
     path: &std::path::Path,
+    points: &[Point],
     with_grid: bool,
   ) -> Result<(), String> {
     let mut drawing = Drawing::new();
@@ -606,13 +90,12 @@ impl ContourSet {
     }
 
     let mut aabb = AABB::empty();
-    for part in &self.parts {
-      for contour in &part.contours {
-        for i in 0..contour.points.len() {
-          aabb = aabb.with(self.points[contour.points[i] as usize]);
-        }
+    for contour in &self.contours {
+      for &p in &contour.points {
+        aabb = aabb.with(points[p]);
       }
     }
+
     if with_grid {
       fn point2d_to_dxf(pt: Point) -> dxf::Point {
         dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 }
@@ -640,240 +123,20 @@ impl ContourSet {
         }
       }
     }
-    for part in &self.parts {
-      for contour in &part.contours {
-        let mut pl = Polyline::default();
-        for i in 0..contour.points.len() {
-          fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
-            dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
-          }
-          let v = point2d_to_dxf(self.points[contour.points[i] as usize]);
-          pl.add_vertex(&mut drawing, v);
-        }
-        pl.set_is_closed(true);
-        let mut e = Entity::new(EntityType::Polyline(pl));
-        if with_grid {
-          e.common.color = dxf::Color::from_index(250);
-        }
-        drawing.add_entity(e);
-      }
-    }
-
-    drawing
-      .save_file(path)
-      .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))
-  }
-
-  pub fn load_from_dxf(path: &std::path::Path) -> Result<Self, String> {
-    let mut result_points = Vec::new();
-    let mut fp = FragmentedParts::new();
-    let drawing = Drawing::load_file(path)
-      .map_err(|e| format!("Unable to open file {} for reading: {}", path.to_string_lossy(), e))?;
-    for e in drawing.entities() {
-      match &e.specific {
-        EntityType::Polyline(points) => {
-          let mut c = Contour::new();
-
-          for p in points.vertices() {
-            let v = Point { x: p.location.x as f32, y: p.location.y as f32 };
-            result_points.push(v);
-            c.points.push((result_points.len() - 1) as u32);
-          }
-          fp.contours.push(c);
-        }
-        _ => {}
-      }
-    }
-
-    Ok(fp.into_contour_set(result_points))
-  }
-
-  pub fn points_count(&self) -> usize {
-    self.points.len()
-  }
-
-  pub fn optimize(&mut self, eps: f32) {
-    for p in &mut self.parts {
-      p.optimize(&self.points, eps)
-    }
-  }
-
-  pub fn get_square(&self) -> f32 {
-    let mut result = 0.0;
-    for p in &self.parts {
-      result += p.get_square(&self.points)
-    }
-    result
-  }
-
-  pub fn get_length(&self) -> f32 {
-    let mut result = 0.0;
-    for p in &self.parts {
-      result += p.get_length(&self.points)
-    }
-    result
-  }
-
-  pub fn remove_trash(&mut self) {
-    for p in &mut self.parts {
-      p.remove_trash(&self.points)
-    }
-
-    self.parts.retain(|p| p.contours.len() > 0);
-  }
-
-  pub fn split_to_triangles(&mut self) {
-    let mut parts = Vec::new();
-    let old_parts = std::mem::take(&mut self.parts);
-    for p in old_parts {
-      parts.extend(p.split_to_triangles(&self.points));
-    }
-
-    self.parts = parts;
-  }
-
-  pub fn extrude(&self, width: f32) -> Vec<crate::model::Model> {
-    self.parts.iter().map(|p| p.extrude(&self.points, width)).collect()
-  }
-
-  pub fn new() -> Self {
-    Self { points: Vec::new(), parts: Vec::new() }
-  }
-
-  pub fn append(&mut self, mut rhs: ContourSet) {
-    for rhsp in &mut rhs.parts {
-      for c in &mut rhsp.contours {
-        for p in &mut c.points {
-          *p += self.points.len() as u32;
-        }
-      }
-    }
-    self.points.extend(rhs.points);
-    self.parts.extend(rhs.parts);
-  }
-
-  pub fn translate(&mut self, shift: Point) {
-    for p in &mut self.points {
-      *p += shift;
-    }
-  }
-
-  pub fn rotate(&mut self, angle: f32) {
-    let angle = Point::from_angle(angle);
-    for p in &mut self.points {
-      *p = complex_mul(*p, angle);
-    }
-  }
-}
-
-impl FragmentedParts {
-  pub fn new() -> Self {
-    Self { contours: Vec::new() }
-  }
-
-  pub fn split_to_connected_areas(mut self, points: &[Point]) -> Vec<ConnectedPart> {
-    let squares: Vec<(f32, i32)> = self
-      .contours
-      .iter()
-      .map(|c| {
-        if c.points.is_empty() {
-          (0.0, 0)
-        } else {
-          let sq = c.get_square(points);
-          (sq, sq.signum() as i32)
-        }
-      })
-      .collect();
-
-    let mut insides = Vec::new();
-    insides.resize(self.contours.len(), Vec::new());
-
-    for i in 0..self.contours.len() {
-      if squares[i].1 == 1 {
-        insides[i].push(i);
-        continue;
-      }
-      if squares[i].1 == 0 {
-        continue;
-      }
-      let pt0 = self.contours[i].points[0];
-      let mut inside = (self.contours.len(), f32::INFINITY, false);
-      for j in 0..self.contours.len() {
-        if i == j || squares[j].1 != 1 || !self.contours[j].contains_inner(points, pt0) {
-          continue;
-        }
-
-        if inside.1 > squares[j].0 {
-          inside = (j, squares[j].0, true);
-        }
-      }
-
-      if !inside.2 {
-        let fail = ContourSet {
-          points: points.to_owned(),
-          parts: vec![ConnectedPart { contours: self.contours.clone() }],
-        };
-        let _ = fail.save_to_dxf(std::path::Path::new("fail.dxf"));
-      }
-      assert!(inside.2);
-      insides[inside.0].push(i);
-    }
-
-    insides
-      .into_iter()
-      .filter(|i| !i.is_empty())
-      .map(|i| ConnectedPart {
-        contours: i
-          .into_iter()
-          .map(|i| std::mem::replace(&mut self.contours[i], Contour::new()))
-          .collect(),
-      })
-      .collect()
-  }
-
-  pub fn into_contour_set(mut self, points: Vec<Point>) -> ContourSet {
-    let parts = self.split_to_connected_areas(&points);
-    ContourSet { points, parts }
-  }
-}
-
-#[derive(Debug, Copy, Clone)]
-struct Triangle {
-  color: u32,
-  vertices: [u32; 3],
-}
-
-#[derive(Debug)]
-pub struct Triangulation {
-  points: Vec<Point>,
-  triangles: Vec<Triangle>,
-}
-
-impl Triangulation {
-  fn new() -> Self {
-    Self { points: Vec::new(), triangles: Vec::new() }
-  }
-
-  pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
-    let mut drawing = Drawing::new();
-    drawing.header.drawing_units = dxf::enums::DrawingUnits::Metric;
-    {
-      // CYPCUT access violation fix
-      let dc = drawing.dim_styles().count();
-      for i in 0..dc {
-        drawing.remove_dim_style(dc - 1 - i);
-      }
-    }
-    for t in &self.triangles {
+    for contour in &self.contours {
       let mut pl = Polyline::default();
-      fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
-        dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
+      for i in 0..contour.points.len() {
+        fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
+          dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
+        }
+        let v = point2d_to_dxf(points[contour.points[i] as usize]);
+        pl.add_vertex(&mut drawing, v);
       }
-      pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t.vertices[0] as usize]));
-      pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t.vertices[1] as usize]));
-      pl.add_vertex(&mut drawing, point2d_to_dxf(self.points[t.vertices[2] as usize]));
       pl.set_is_closed(true);
       let mut e = Entity::new(EntityType::Polyline(pl));
+      if with_grid {
+        e.common.color = dxf::Color::from_index(250);
+      }
       drawing.add_entity(e);
     }
 
@@ -881,66 +144,282 @@ impl Triangulation {
       .save_file(path)
       .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))
   }
+}
 
-  fn get_topology(&self) -> TriangulationTopology {
-    let mut edge_to_triangle = FxHashMap::<(u32, u32), (u32, u32)>::default();
-    const BAD_INDEX: u32 = u32::MAX;
-    let mut make_edge = |t, v1, v2| {
-      if v1 < v2 {
-        let e = edge_to_triangle.entry((v1, v2)).or_insert((BAD_INDEX, BAD_INDEX));
-        if e.0 != BAD_INDEX {
-          panic!("fail with edge {v1} to {v2} while add {t}: {:?}, first elem still used", e);
+#[derive(Debug, Clone)]
+struct TopologyEdge {
+  part: PartIndex,
+  begin: usize,
+  end: usize,
+  p_right: Vec<usize>,
+  p_left: Vec<usize>,
+  ascending: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TopologyVertex {
+  part: PartIndex,
+  edge_in: usize,
+  edge_out: usize,
+}
+
+#[derive(Debug)]
+pub struct ContourTopology {
+  vertices: Vec<TopologyVertex>,
+  points: Vec<Point>,
+  edges: Vec<TopologyEdge>,
+}
+
+impl ContourTopology {
+  fn new() -> Self {
+    Self { vertices: Vec::new(), points: Vec::new(), edges: Vec::new() }
+  }
+
+  fn validate(&self) {
+    let mut l_checked = fxhash::FxHashSet::default();
+    let mut r_checked = fxhash::FxHashSet::default();
+    for e in &self.edges {
+      if e.ascending {
+        for &l in &e.p_left {
+          assert!(self.vertices[l].part == e.part);
+          assert!(l_checked.insert(l));
         }
-        e.0 = t;
       } else {
-        let e = edge_to_triangle.entry((v2, v1)).or_insert((BAD_INDEX, BAD_INDEX));
-        if e.1 != BAD_INDEX {
-          panic!("fail with edge {v1} to {v2} while add {t}: {:?}, second elem still used", e);
+        for &r in &e.p_right {
+          assert!(self.vertices[r].part == e.part);
+          assert!(r_checked.insert(r));
         }
-        e.1 = t;
       }
-    };
-
-    for i in 0..self.triangles.len() {
-      let v = self.triangles[i].vertices;
-      make_edge(i as u32, v[0], v[1]);
-      make_edge(i as u32, v[1], v[2]);
-      make_edge(i as u32, v[2], v[0]);
     }
+  }
 
-    let mut triangle_adj = Vec::<[u32; 3]>::new();
-    triangle_adj.resize(self.triangles.len(), [BAD_INDEX; 3]);
+  pub fn optimize(&mut self, treshhold: f32) {
+    enum SkippedEdge {
+      Skipped,
+      Points(Vec<usize>),
+    }
+    let mut skips = Vec::<SkippedEdge>::new();
+    skips.resize_with(self.edges.len(), || SkippedEdge::Points(Vec::new()));
+    'each_edge: for i in 0..self.edges.len() {
+      match &skips[i] {
+        SkippedEdge::Skipped => {}
+        SkippedEdge::Points(p1) => {
+          let e1 = &self.edges[i];
+          let mid = e1.end;
+          let e2i = self.vertices[mid].edge_out;
+          let e2 = &self.edges[e2i];
+          let new_begin = e1.begin;
+          let new_end = e1.end;
+          let p_begin = self.points[new_begin];
+          let p_end = self.points[new_end];
+          match &skips[e2i] {
+            SkippedEdge::Skipped => panic!("Valid edge cant be continued by invalid"),
+            SkippedEdge::Points(p2) => {
+              for p in p1.iter().copied().chain([mid]).chain(p2.iter().copied()) {
+                if dist_pl(self.points[p], p_begin, p_end) > treshhold {
+                  continue 'each_edge;
+                }
+              }
+              if e1.ascending && e2.ascending {
+                for l in e1.p_left.iter().copied().chain(e2.p_left.iter().copied()) {
+                  let p = self.points[l];
+                  if cross(p_begin - p, p_end - p) < 0.0 {
+                    continue 'each_edge;
+                  }
+                }
+                for r in e1.p_right.iter().copied().chain(e2.p_right.iter().copied()) {
+                  let p = self.points[r];
+                  if cross(p_begin - p, p_end - p) > 0.0 {
+                    continue 'each_edge;
+                  }
+                }
 
-    let use_edge = |dst: &mut u32, v1, v2| {
-      if v1 < v2 {
-        *dst = edge_to_triangle.get(&(v1, v2)).unwrap().1;
-      } else {
-        *dst = edge_to_triangle.get(&(v2, v1)).unwrap().0;
+              //  todo!()
+              } else if !e1.ascending && !e2.ascending {
+                for l in e1.p_left.iter().copied().chain(e2.p_left.iter().copied()) {
+                  let p = self.points[l];
+                  if cross(p_begin - p, p_end - p) > 0.0 {
+                    continue 'each_edge;
+                  }
+                }
+                for r in e1.p_right.iter().copied().chain(e2.p_right.iter().copied()) {
+                  let p = self.points[r];
+                  if cross(p_begin - p, p_end - p) < 0.0 {
+                    continue 'each_edge;
+                  }
+                }
+
+               // todo!()
+              } else if e1.ascending && !e2.ascending {
+                if i > e2i {
+                  // this case need deep rearrangement of topology, so we skip
+                  continue 'each_edge;
+                } else {
+                  if e2.p_right.is_empty() {
+                    assert!(*e1.p_left.last().unwrap() == new_end);
+                    for &l in &e1.p_left[..e1.p_left.len() - 1] {
+                      let p = self.points[l];
+                      if cross(p_begin - p, p_end - p) > 0.0 {
+                        continue 'each_edge;
+                      }
+                    }
+
+                 //   todo!()
+                  } else if e1.p_left.is_empty() {
+                    assert!(*e1.p_right.last().unwrap() == new_end);
+                    for &r in &e1.p_right[..e1.p_right.len() - 1] {
+                      let p = self.points[r];
+                      if cross(p_begin - p, p_end - p) > 0.0 {
+                        continue 'each_edge;
+                      }
+                    }
+                //    todo!()
+                  } else {
+                      continue 'each_edge;
+                  }
+                }
+              } else if !e1.ascending && e2.ascending {
+                if i < e2i {
+                  // this case need deep rearrangement of topology, so we skip
+                  continue 'each_edge;
+                } else {
+                  if e1.p_right.is_empty() {
+                    assert!(e2.p_left[0] == new_end);
+                    for &l in &e2.p_left[1..] {
+                      let p = self.points[l];
+                      if cross(p_begin - p, p_end - p) > 0.0 {
+                        continue 'each_edge;
+                      }
+                    }
+
+                //    todo!()
+                  } else if e2.p_left.is_empty() {
+                    assert!(e1.p_right[0] == new_begin);
+                    for &r in &e1.p_right[1..] {
+                      let p = self.points[r];
+                      if cross(p_begin - p, p_end - p) > 0.0 {
+                        continue 'each_edge;
+                      }
+                    }
+
+                //    todo!()
+                  } else {
+                        continue 'each_edge;
+                  }
+                }
+              }
+            }
+          }
+        }
       }
-    };
-
-    for i in 0..self.triangles.len() {
-      let v = self.triangles[i].vertices;
-      use_edge(&mut triangle_adj[i][0], v[0], v[1]);
-      use_edge(&mut triangle_adj[i][1], v[1], v[2]);
-      use_edge(&mut triangle_adj[i][2], v[2], v[0]);
     }
+  }
 
-    triangle_adj
+  pub fn get_contours(&self) -> FxHashMap<PartIndex, Contours> {
+    let mut visited = Vec::new();
+    let mut result = FxHashMap::<PartIndex, Contours>::default();
+    visited.resize(self.edges.len(), false);
+    for i in 0..self.edges.len() {
+      if visited[i] {
+        continue;
+      }
+      let mut contour = Contour::new();
+      let part = self.edges[i].part;
+      let mut cur = i;
+      loop {
+        visited[cur] = true;
+        let e = &self.edges[cur];
+        contour.points.push(e.end);
+        cur = self.vertices[e.end].edge_out;
+        if visited[cur] {
+          break;
+        }
+      }
+      result.entry(part).or_default().contours.push(contour);
+    }
+    result
+  }
+
+  pub fn get_points(&self) -> &[Point] {
+    &self.points
+  }
+
+  pub fn get_triangles(&self) -> FxHashMap<PartIndex, Vec<Triangle>> {
+    todo!()
   }
 }
 
-type TriangulationTopology = Vec<[u32; 3]>;
+#[derive(Debug, Clone)]
+struct BitBuffer {
+  elements: Vec<usize>,
+}
+
+impl BitBuffer {
+  fn new() -> Self {
+    Self { elements: Vec::new() }
+  }
+
+  fn clear(&mut self) {
+    self.elements.clear();
+  }
+
+  fn resize(&mut self, new_len: usize) {
+    let bsz = usize::BITS as usize;
+    let new_len = new_len.div_ceil(bsz);
+    self.elements.resize(new_len, 0);
+  }
+
+  fn put_range(&mut self, mut begin: usize, mut end: usize) -> Vec<usize> {
+    if begin > end {
+      (begin, end) = (end, begin);
+    }
+
+    let mask = usize::BITS as usize - 1;
+    let bsz = usize::BITS as usize;
+    let mut result = Vec::new();
+    let b = begin / bsz;
+    let bn = begin & mask;
+    let e = end / bsz;
+    let en = end & mask;
+
+    let mut push_bits = |pat: &mut usize, mask: usize, new_bits: usize, offset: usize| {
+      let mut p = *pat & mask;
+      while p != 0 {
+        let bit = p.trailing_zeros() as usize;
+        result.push(offset + bit);
+        p -= 1 << bit;
+      }
+      *pat = *pat & !mask | new_bits;
+    };
+
+    if b == e {
+      let be_mask = (1 << en) - (1 << (bn + 1));
+      push_bits(&mut self.elements[b], be_mask, 1 << bn | 1 << en, b * bsz);
+      self.elements[b] &= !be_mask;
+      self.elements[b] |= 1 << bn | 1 << en;
+    } else {
+      let b_mask = (usize::MAX << bn) << 1;
+      push_bits(&mut self.elements[b], b_mask, 1 << bn, b * bsz);
+      for cb in b + 1..e {
+        push_bits(&mut self.elements[cb], usize::MAX, 0, cb * bsz);
+      }
+      let e_mask = (1 << en) - 1;
+      push_bits(&mut self.elements[e], e_mask, 1 << en, e * bsz);
+    }
+
+    result
+  }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct ContourCell {
   corner_part_index: PartIndex,
   corner: Point,
-  corner_point_index: u32,
-  v_mz: u32,
-  v_pz: u32,
-  v_zm: u32,
-  v_zp: u32,
+  corner_point_index: usize,
+  v_mz: usize,
+  v_pz: usize,
+  v_zm: usize,
+  v_zp: usize,
 }
 
 impl ContourCell {
@@ -948,30 +427,235 @@ impl ContourCell {
     Self {
       corner_part_index: 0,
       corner: Point { x: 0.0, y: 0.0 },
-      corner_point_index: BAD_INDEX,
-      v_mz: BAD_INDEX,
-      v_pz: BAD_INDEX,
-      v_zm: BAD_INDEX,
-      v_zp: BAD_INDEX,
+      corner_point_index: BAD_VERTEX,
+      v_mz: BAD_VERTEX,
+      v_pz: BAD_VERTEX,
+      v_zm: BAD_VERTEX,
+      v_zp: BAD_VERTEX,
     }
   }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+struct SortedBuffer {
+  vertices: Vec<usize>, // indices
+  edges: Vec<usize>,
+}
+
+impl SortedBuffer {
+  fn merge(&mut self, other_v: &[usize], other_e: &[(usize, usize)]) {
+    todo!()
+  }
+}
+
+#[derive(Debug)]
+struct TmpBuf {
+  edge_by_cells: Vec<usize>, // buffer of count egdes in cells for sorting
+  bottom_ord_rev: Vec<usize>,
+  mid_ord: Vec<usize>,  // by sorted fragments
+  mid_ord2: Vec<usize>, // second buffer for merge-sort
+  mid_len: Vec<usize>,  // buffer or slice lenghts for merge-sort
+  top_ord_rev: Vec<usize>,
+  ord2v: Vec<usize>, // ord -> vertex index
+  v2ord: Vec<usize>, // vertex index -> ord
+  ranges: BitBuffer,
+}
+
+impl TmpBuf {
+  fn new() -> Self {
+    Self {
+      edge_by_cells: Vec::new(),
+      bottom_ord_rev: Vec::new(),
+      mid_ord: Vec::new(),
+      mid_ord2: Vec::new(),
+      mid_len: Vec::new(),
+      top_ord_rev: Vec::new(),
+      ord2v: Vec::new(),
+      v2ord: Vec::new(),
+      ranges: BitBuffer::new(),
+    }
+  }
+
+  fn clear(&mut self) {
+    self.edge_by_cells.clear();
+    self.bottom_ord_rev.clear();
+    self.mid_ord.clear();
+    self.mid_ord2.clear();
+    self.mid_len.clear();
+    self.ord2v.clear();
+    // v2ord keep between iters because numeration for all vertices
+    self.top_ord_rev.clear();
+    self.ranges.clear();
+  }
+
+  fn extend_bot_rev(&mut self, v: &[usize]) {
+    for &v in v {
+      if v != BAD_VERTEX {
+        self.bottom_ord_rev.push(v);
+      }
+    }
+  }
+
+  fn extend_top_rev(&mut self, v: &[usize]) {
+    for &v in v {
+      if v != BAD_VERTEX {
+        self.top_ord_rev.push(v);
+      }
+    }
+  }
+
+  fn extend_mid(&mut self, v: &[usize]) {
+    let mut l = 0;
+    for &v in v {
+      if v != BAD_VERTEX {
+        self.mid_ord.push(v);
+        l += 1;
+      }
+    }
+    if l > 0 {
+      self.mid_len.push(l);
+    }
+  }
+
+  fn sort_mid(&mut self, points: &[Point]) {
+    while self.mid_len.len() > 1 {
+      let mut i = 0;
+      let mut cursor = 0;
+      self.mid_ord2.clear();
+      while i * 2 < self.mid_len.len() {
+        let mut l1 = self.mid_len[i * 2];
+        let mut l2 = self.mid_len.get(i * 2 + 1).copied().unwrap_or(0);
+        let mut i1 = 0;
+        let mut i2 = 0;
+        loop {
+          if i1 == l1 {
+            if i2 == l2 {
+              break;
+            } else {
+              self.mid_ord2.push(self.mid_ord[cursor + l1 + i2]);
+              i2 += 1;
+            }
+          } else {
+            if i2 == l2 {
+              self.mid_ord2.push(self.mid_ord[cursor + i1]);
+              i1 += 1;
+            } else {
+              let m1 = self.mid_ord[cursor + i1];
+              let m2 = self.mid_ord[cursor + l1 + i2];
+              if points[m1].y <= points[m2].y {
+                self.mid_ord2.push(m1);
+                i1 += 1;
+              } else {
+                self.mid_ord2.push(m2);
+                i2 += 1;
+              }
+            }
+          }
+        }
+        cursor += l1 + l2;
+        self.mid_len[i] = l1 + l2;
+        i += 1;
+      }
+      std::mem::swap(&mut self.mid_ord, &mut self.mid_ord2);
+      self.mid_len.truncate((self.mid_len.len() + 1) / 2);
+    }
+  }
+}
+
+#[derive(Debug)]
 pub struct ContourCreator {
   aabb: AABB,
   scale: f32,
   size_x: usize,
   size_y: usize,
   tries: usize,
-  points: Vec<Point>,
+  topology: ContourTopology,
+  tmp_buf: TmpBuf,
 }
 
 impl ContourCreator {
   pub fn new(aabb: AABB, scale: f32, tries: usize) -> Self {
     let size_x = ((aabb.x2 - aabb.x1) / scale).ceil() as usize + 1;
     let size_y = ((aabb.y2 - aabb.y1) / scale).ceil() as usize + 1;
-    Self { aabb, scale, size_x, size_y, tries, points: Vec::new() }
+    Self {
+      aabb,
+      scale,
+      size_x,
+      size_y,
+      tries,
+      topology: ContourTopology::new(),
+      tmp_buf: TmpBuf::new(),
+    }
+  }
+
+  fn order_last_layer_points(&mut self) -> usize {
+    self.tmp_buf.sort_mid(&self.topology.points);
+    self.tmp_buf.v2ord.resize(self.topology.points.len(), 0);
+    let mut ord = 0;
+    for &p in (self.tmp_buf.bottom_ord_rev.iter().rev())
+      .chain(self.tmp_buf.mid_ord.iter())
+      .chain(self.tmp_buf.top_ord_rev.iter().rev())
+    {
+      self.tmp_buf.v2ord[p] = ord;
+      self.tmp_buf.ord2v.push(p);
+      ord += 1;
+    }
+    return ord;
+  }
+
+  fn make_edge_ascending_flags(&mut self, edge_cursor: usize) {
+    for e in &mut self.topology.edges[edge_cursor..] {
+      e.ascending = self.tmp_buf.v2ord[e.begin] < self.tmp_buf.v2ord[e.end];
+    }
+  }
+
+  fn sort_last_layer_edges(&mut self, mut edge_cursor: usize) {
+    for &l in &self.tmp_buf.edge_by_cells {
+      for t in 1..l {
+        for i in edge_cursor..edge_cursor + l - t {
+          if self.topology.edges[i].ascending && !self.topology.edges[i + 1].ascending {
+            self.topology.edges.swap(i - 1, i);
+          }
+        }
+      }
+
+      edge_cursor += l;
+    }
+  }
+
+  fn fill_edges_p_left(&mut self, edge_cursor: usize, ords: usize) {
+    self.tmp_buf.ranges.clear();
+    self.tmp_buf.ranges.resize(ords);
+    //   let mut used_ords = fxhash::FxHashSet::default();
+    //  let mut used_v = fxhash::FxHashSet::default();
+    for e in &mut self.topology.edges[edge_cursor..] {
+      let mut range =
+        self.tmp_buf.ranges.put_range(self.tmp_buf.v2ord[e.begin], self.tmp_buf.v2ord[e.end]);
+      for r in &mut range {
+        //   assert!(used_ords.insert(*r));
+        *r = self.tmp_buf.ord2v[*r];
+        //    assert!(used_v.insert(*r));
+      }
+      e.p_left = range;
+    }
+  }
+
+  fn fill_edges_p_right(&mut self, edge_cursor: usize, ords: usize) {
+    self.tmp_buf.ranges.clear();
+    self.tmp_buf.ranges.resize(ords);
+    // let mut used_ords = fxhash::FxHashSet::default();
+    //  let mut used_v = fxhash::FxHashSet::default();
+    for e in self.topology.edges[edge_cursor..].iter_mut().rev() {
+      let mut range =
+        self.tmp_buf.ranges.put_range(self.tmp_buf.v2ord[e.begin], self.tmp_buf.v2ord[e.end]);
+
+      for r in &mut range {
+        // assert!(used_ords.insert(*r));
+        *r = self.tmp_buf.ord2v[*r];
+        // assert!(used_v.insert(*r));
+      }
+      e.p_right = range;
+    }
   }
 
   fn index_to_point(&self, x: usize, y: usize) -> Point {
@@ -989,7 +673,7 @@ impl ContourCreator {
     self.index_to_point(x * 2, y * 2)
   }
 
-  fn fill_cell(
+  fn init_cell(
     &mut self,
     cell: &mut ContourCell,
     x: usize,
@@ -998,293 +682,126 @@ impl ContourCreator {
   ) {
     cell.corner = self.corner_of_cell(x, y);
     cell.corner_part_index = part_f(cell.corner);
-    cell.corner_point_index = self.index_of_new_point(cell.corner);
+    cell.corner_point_index = self.index_of_new_point(cell.corner, cell.corner_part_index);
   }
 
-  fn index_of_new_point(&mut self, pt: Point) -> u32 {
-    let result = self.points.len() as u32;
-    self.points.push(pt);
+  fn index_of_new_point(&mut self, pt: Point, part: PartIndex) -> usize {
+    let result = self.topology.points.len();
+    self.topology.points.push(pt);
+    self.topology.vertices.push(TopologyVertex { edge_in: BAD_EDGE, edge_out: BAD_EDGE, part });
     result
   }
 
   fn fill_ti(
+    &mut self,
     i1: PartIndex,
     i2: PartIndex,
     i3: PartIndex,
-    p12: u32,
-    p13: u32,
-    result: &mut FxHashMap<PartIndex, FxHashMap<u32, u32>>,
+    p12: usize,
+    p13: usize,
   ) -> bool {
     if i1 != 0 && i1 != i2 && i1 != i3 {
-      assert!(p12 != BAD_INDEX);
-      assert!(p13 != BAD_INDEX);
-      let prev = result.entry(i1).or_default().insert(p12, p13);
-      assert!(prev.is_none());
+      assert!(p12 != BAD_VERTEX);
+      assert!(p13 != BAD_VERTEX);
+      self.topology.edges.push(TopologyEdge {
+        begin: p12,
+        end: p13,
+        part: i1,
+        p_right: Vec::new(),
+        p_left: Vec::new(),
+        ascending: false,
+      });
+      self.topology.vertices[p12].edge_out = self.topology.edges.len() - 1;
+      self.topology.vertices[p13].edge_in = self.topology.edges.len() - 1;
       return true;
     }
     false
   }
 
   fn fill_to(
+    &mut self,
     i1: PartIndex,
     i2: PartIndex,
     i3: PartIndex,
-    p21: u32,
-    p31: u32,
-    result: &mut FxHashMap<PartIndex, FxHashMap<u32, u32>>,
+    p21: usize,
+    p31: usize,
   ) -> bool {
     if i1 != i2 && i2 != 0 && i2 == i3 {
-      assert!(p21 != BAD_INDEX);
-      assert!(p31 != BAD_INDEX);
-      let prev = result.entry(i2).or_default().insert(p31, p21);
-      assert!(prev.is_none());
-      return true;
-    }
-    false
-  }
-
-  fn fill_tt_aaa(
-    i1: PartIndex,
-    i2: PartIndex,
-    i3: PartIndex,
-    p1: u32,
-    p2: u32,
-    p3: u32,
-    triangles: &mut Vec<Triangle>,
-  ) -> bool {
-    if i1 == i2 && i1 == i3 {
-      assert!(p1 != BAD_INDEX);
-      assert!(p2 != BAD_INDEX);
-      assert!(p3 != BAD_INDEX);
-      triangles.push(Triangle{color:i1, vertices: [p1, p2, p3]});
-      return true;
-    }
-    false
-  }
-
-  fn fill_tt_a00(
-    i1: PartIndex,
-    i2: PartIndex,
-    i3: PartIndex,
-    p1: u32,
-    p2: u32,
-    p3: u32,
-    p12: u32,
-    p13: u32,
-    triangles: &mut Vec<Triangle>,
-  ) -> bool {
-    if i1 > 0 && i2 == 0 && i3 == 0 {
-      assert!(p1 != BAD_INDEX);
-      assert!(p2 != BAD_INDEX);
-      assert!(p3 != BAD_INDEX);
-      assert!(p12 != BAD_INDEX);
-      assert!(p13 != BAD_INDEX);
-      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
-      triangles.push(Triangle{color:0, vertices: [p12, p2, p3]});
-      triangles.push(Triangle{color:0, vertices: [p12, p3, p13]});
-      return true;
-    }
-    false
-  }
-
-  fn fill_tt_aa0(
-    i1: PartIndex,
-    i2: PartIndex,
-    i3: PartIndex,
-    p1: u32,
-    p2: u32,
-    p3: u32,
-    p13: u32,
-    p23: u32,
-    triangles: &mut Vec<Triangle>,
-  ) -> bool {
-    if i1 == i2 && i1 > 0 && i3 == 0 {
-      assert!(p1 != BAD_INDEX);
-      assert!(p2 != BAD_INDEX);
-      assert!(p3 != BAD_INDEX);
-      assert!(p13 != BAD_INDEX);
-      assert!(p23 != BAD_INDEX);
-      triangles.push(Triangle{color:i1, vertices: [p1, p2, p23]});
-      triangles.push(Triangle{color:i1, vertices: [p1, p23, p13]});
-      triangles.push(Triangle{color:0, vertices: [p3, p13, p23]});
-      return true;
-    }
-    false
-  }
-
-  fn fill_tt_abb(
-    i1: PartIndex,
-    i2: PartIndex,
-    i3: PartIndex,
-    p1: u32,
-    p2: u32,
-    p3: u32,
-    p12: u32,
-    p21: u32,
-    p13: u32,
-    p31: u32,
-    triangles: &mut Vec<Triangle>,
-  ) -> bool {
-    if i1 > 0 && i2 > 0 && i2 == i3 && i1 != i2 {
-      assert!(p1 != BAD_INDEX);
-      assert!(p2 != BAD_INDEX);
-      assert!(p3 != BAD_INDEX);
-      assert!(p12 != BAD_INDEX);
-      assert!(p21 != BAD_INDEX);
-      assert!(p13 != BAD_INDEX);
-      assert!(p31 != BAD_INDEX);
-      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
-      triangles.push(Triangle{color:0, vertices: [p12, p21, p31]});
-      triangles.push(Triangle{color:0, vertices: [p12, p31, p13]});
-      triangles.push(Triangle{color:i2, vertices: [p21, p2, p3]});
-      triangles.push(Triangle{color:i2, vertices: [p21, p3, p31]});
-      return true;
-    }
-    false
-  }
-
-  fn fill_tt_ab0(
-    i1: PartIndex,
-    i2: PartIndex,
-    i3: PartIndex,
-    p1: u32,
-    p2: u32,
-    p3: u32,
-    p12: u32,
-    p21: u32,
-    p23: u32,
-    p13: u32,
-    triangles: &mut Vec<Triangle>,
-  ) -> bool {
-    if i1 > 0 && i2 > 0 && i3 == 0 && i1 != i2 {
-      assert!(p1 != BAD_INDEX);
-      assert!(p2 != BAD_INDEX);
-      assert!(p3 != BAD_INDEX);
-      assert!(p12 != BAD_INDEX);
-      assert!(p21 != BAD_INDEX);
-      assert!(p23 != BAD_INDEX);
-      assert!(p13 != BAD_INDEX);
-      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
-      triangles.push(Triangle{color:i2, vertices: [p2, p23, p21]});
-      triangles.push(Triangle{color:0, vertices: [p3, p13, p12]});
-      triangles.push(Triangle{color:0, vertices: [p3, p12, p21]});
-      triangles.push(Triangle{color:0, vertices: [p3, p21, p23]});
-      return true;
-    }
-    false
-  }
-
-  fn fill_tt_abc(
-    i1: PartIndex,
-    i2: PartIndex,
-    i3: PartIndex,
-    p1: u32,
-    p2: u32,
-    p3: u32,
-    p12: u32,
-    p21: u32,
-    p13: u32,
-    p31: u32,
-    p23: u32,
-    p32: u32,
-    triangles: &mut Vec<Triangle>,
-  ) -> bool {
-    if i1 > 0 && i2 > 0 && i3 > 0 && i1 != i2 && i1 != i3 && i2 != i3 {
-      assert!(p1 != BAD_INDEX);
-      assert!(p2 != BAD_INDEX);
-      assert!(p3 != BAD_INDEX);
-      assert!(p12 != BAD_INDEX);
-      assert!(p21 != BAD_INDEX);
-      assert!(p23 != BAD_INDEX);
-      assert!(p32 != BAD_INDEX);
-      assert!(p31 != BAD_INDEX);
-      assert!(p13 != BAD_INDEX);
-      triangles.push(Triangle{color:i1, vertices: [p1, p12, p13]});
-      triangles.push(Triangle{color:i2, vertices: [p2, p23, p21]});
-      triangles.push(Triangle{color:i3, vertices: [p3, p31, p32]});
-      triangles.push(Triangle{color:0, vertices: [p12, p21, p23]});
-      triangles.push(Triangle{color:0, vertices: [p12, p23, p32]});
-      triangles.push(Triangle{color:0, vertices: [p12, p32, p31]});
-      triangles.push(Triangle{color:0, vertices: [p12, p31, p13]});
+      assert!(p21 != BAD_VERTEX);
+      assert!(p31 != BAD_VERTEX);
+      self.topology.edges.push(TopologyEdge {
+        begin: p31,
+        end: p21,
+        part: i2,
+        p_right: Vec::new(),
+        p_left: Vec::new(),
+        ascending: false,
+      });
+      self.topology.vertices[p31].edge_out = self.topology.edges.len() - 1;
+      self.topology.vertices[p21].edge_in = self.topology.edges.len() - 1;
       return true;
     }
     false
   }
 
   fn fill_t(
+    &mut self,
     i1: PartIndex,
     i2: PartIndex,
     i3: PartIndex,
-    p1: u32,
-    p2: u32,
-    p3: u32,
-    p12: u32,
-    p21: u32,
-    p13: u32,
-    p31: u32,
-    p23: u32,
-    p32: u32,
-    result: &mut FxHashMap<PartIndex, FxHashMap<u32, u32>>,
-    triangles: &mut Vec<Triangle>,
+    p1: usize,
+    p2: usize,
+    p3: usize,
+    p12: usize,
+    p21: usize,
+    p13: usize,
+    p31: usize,
+    p23: usize,
+    p32: usize,
   ) {
-    Self::fill_ti(i1, i2, i3, p12, p13, result);
-    Self::fill_to(i1, i2, i3, p21, p31, result);
-    Self::fill_ti(i2, i3, i1, p23, p21, result);
-    Self::fill_to(i2, i3, i1, p32, p12, result);
-    Self::fill_ti(i3, i1, i2, p31, p32, result);
-    Self::fill_to(i3, i1, i2, p13, p23, result);
-
-    Self::fill_tt_aaa(i1, i2, i3, p1, p2, p3, triangles)
-      || Self::fill_tt_a00(i1, i2, i3, p1, p2, p3, p12, p13, triangles)
-      || Self::fill_tt_a00(i2, i3, i1, p2, p3, p1, p23, p21, triangles)
-      || Self::fill_tt_a00(i3, i1, i2, p3, p1, p2, p31, p32, triangles)
-      || Self::fill_tt_aa0(i1, i2, i3, p1, p2, p3, p13, p23, triangles)
-      || Self::fill_tt_aa0(i2, i3, i1, p2, p3, p1, p21, p31, triangles)
-      || Self::fill_tt_aa0(i3, i1, i2, p3, p1, p2, p32, p12, triangles)
-      || Self::fill_tt_abb(i1, i2, i3, p1, p2, p3, p12, p21, p13, p31, triangles)
-      || Self::fill_tt_abb(i2, i3, i1, p2, p3, p1, p23, p32, p21, p12, triangles)
-      || Self::fill_tt_abb(i3, i1, i2, p3, p1, p2, p31, p13, p32, p23, triangles)
-      || Self::fill_tt_ab0(i1, i2, i3, p1, p2, p3, p12, p21, p23, p13, triangles)
-      || Self::fill_tt_ab0(i2, i3, i1, p2, p3, p1, p23, p32, p31, p21, triangles)
-      || Self::fill_tt_ab0(i3, i1, i2, p3, p1, p2, p31, p13, p12, p32, triangles)
-      || Self::fill_tt_abc(i1, i2, i3, p1, p2, p3, p12, p21, p13, p31, p23, p32, triangles);
+    let mut ec = 0;
+    ec += self.fill_ti(i1, i2, i3, p12, p13) as usize;
+    ec += self.fill_to(i1, i2, i3, p21, p31) as usize;
+    ec += self.fill_ti(i2, i3, i1, p23, p21) as usize;
+    ec += self.fill_to(i2, i3, i1, p32, p12) as usize;
+    ec += self.fill_ti(i3, i1, i2, p31, p32) as usize;
+    ec += self.fill_to(i3, i1, i2, p13, p23) as usize;
+    if ec > 0 {
+      self.tmp_buf.edge_by_cells.push(ec);
+    }
   }
 
-  pub fn make_contour(
-    &mut self,
-    part_f: &dyn Fn(Point) -> PartIndex,
-  ) -> (FxHashMap<PartIndex, ContourSet>, Triangulation) {
+  pub fn make_contour(mut self, part_f: &dyn Fn(Point) -> PartIndex) -> ContourTopology {
     if self.size_x == 0 || self.size_y == 0 {
-      return (FxHashMap::default(), Triangulation::new());
+      return ContourTopology::new();
     }
 
     let mut cells = vec![ContourCell::new(); self.size_x * self.size_y];
     let szx = self.size_x;
     let szy = self.size_y;
 
-    let mut result = FxHashMap::default();
-    let mut triangulation = Triangulation::new();
-
     macro_rules! fill_mids {
       (
         $part_index1: expr, $point1: expr, $target1: expr,
         $part_index2: expr, $point2: expr, $target2: expr
       ) => {
-        if $part_index1 != $part_index2 {
-          if $part_index1 != 0 {
-            if $part_index2 != 0 {
+        let part_index1 = $part_index1;
+        let part_index2 = $part_index2;
+        if part_index1 != part_index2 {
+          if part_index1 != 0 {
+            if part_index2 != 0 {
               let (pt1, pt2) =
-                find_2roots(part_f, $point1, $point2, $part_index1, $part_index2, self.tries);
-              $target1 = self.index_of_new_point(pt1);
-              $target2 = self.index_of_new_point(pt2);
+                find_2roots(part_f, $point1, $point2, part_index1, part_index2, self.tries);
+              $target1 = self.index_of_new_point(pt1, part_index1);
+              $target2 = self.index_of_new_point(pt2, part_index2);
             } else {
-              let pt = find_root(part_f, $point1, $point2, $part_index1, self.tries);
-              $target1 = self.index_of_new_point(pt);
+              let pt = find_root(part_f, $point1, $point2, part_index1, self.tries);
+              $target1 = self.index_of_new_point(pt, part_index1);
             }
           } else {
-            if $part_index2 != 0 {
-              let pt = find_root(part_f, $point2, $point1, $part_index2, self.tries);
-              $target2 = self.index_of_new_point(pt);
+            if part_index2 != 0 {
+              let pt = find_root(part_f, $point2, $point1, part_index2, self.tries);
+              $target2 = self.index_of_new_point(pt, part_index2);
             }
           }
         }
@@ -1306,13 +823,13 @@ impl ContourCreator {
       };
     }
 
-    self.fill_cell(&mut cells[0], 0, 0, part_f);
+    self.init_cell(&mut cells[0], 0, 0, part_f);
     if cells[0].corner_part_index != 0 {
       panic!("Fail aabb in position {:?}", cells[0].corner);
     }
 
     for x in 1..szx {
-      self.fill_cell(&mut cells[x], x, 0, part_f);
+      self.init_cell(&mut cells[x], x, 0, part_f);
 
       if cells[x].corner_part_index != 0 {
         panic!("Fail aabb in position {:?}", cells[x].corner);
@@ -1326,7 +843,10 @@ impl ContourCreator {
       let c10 = c - szx;
       let c11 = c;
 
-      self.fill_cell(&mut cells[c11], 0, y, part_f);
+      self.tmp_buf.clear();
+      let edge_cursor = self.topology.edges.len();
+
+      self.init_cell(&mut cells[c11], 0, y, part_f);
       fill_side_mids!(c10, v_zp, c11, v_zm);
 
       if cells[c11].corner_part_index != 0 {
@@ -1339,7 +859,7 @@ impl ContourCreator {
         let c10 = c - szx;
         let c01 = c - 1;
         let c11 = c;
-        self.fill_cell(&mut cells[c11], x, y, part_f);
+        self.init_cell(&mut cells[c11], x, y, part_f);
 
         if x == szx - 1 || y == szy - 1 {
           if cells[c11].corner_part_index != 0 {
@@ -1353,16 +873,7 @@ impl ContourCreator {
         // fill cell here
         let center = self.center_of_cell(x, y);
         let center_part_index = part_f(center);
-        let center_point_index = self.index_of_new_point(center);
-
-        let mut v_mmi = BAD_INDEX;
-        let mut v_mmo = BAD_INDEX;
-        let mut v_mpi = BAD_INDEX;
-        let mut v_mpo = BAD_INDEX;
-        let mut v_pmi = BAD_INDEX;
-        let mut v_pmo = BAD_INDEX;
-        let mut v_ppi = BAD_INDEX;
-        let mut v_ppo = BAD_INDEX;
+        let center_point_index = self.index_of_new_point(center, center_part_index);
 
         macro_rules! fill_center_mid {
           ($ci: expr, $dst1: ident, $dst2: ident) => {
@@ -1371,63 +882,21 @@ impl ContourCreator {
           };
         }
 
+        let mut v_mmi = BAD_VERTEX;
+        let mut v_mmo = BAD_VERTEX;
+        let mut v_mpi = BAD_VERTEX;
+        let mut v_mpo = BAD_VERTEX;
+        let mut v_pmi = BAD_VERTEX;
+        let mut v_pmo = BAD_VERTEX;
+        let mut v_ppi = BAD_VERTEX;
+        let mut v_ppo = BAD_VERTEX;
+
         fill_center_mid!(c00, v_mmi, v_mmo);
         fill_center_mid!(c01, v_mpi, v_mpo);
         fill_center_mid!(c10, v_pmi, v_pmo);
         fill_center_mid!(c11, v_ppi, v_ppo);
 
-        Self::fill_t(
-          center_part_index,
-          cells[c00].corner_part_index,
-          cells[c10].corner_part_index,
-          center_point_index,
-          cells[c00].corner_point_index,
-          cells[c10].corner_point_index,
-          v_mmi,
-          v_mmo,
-          v_pmi,
-          v_pmo,
-          cells[c00].v_pz,
-          cells[c10].v_mz,
-          &mut result,
-          &mut triangulation.triangles,
-        );
-
-        Self::fill_t(
-          center_part_index,
-          cells[c10].corner_part_index,
-          cells[c11].corner_part_index,
-          center_point_index,
-          cells[c10].corner_point_index,
-          cells[c11].corner_point_index,
-          v_pmi,
-          v_pmo,
-          v_ppi,
-          v_ppo,
-          cells[c10].v_zp,
-          cells[c11].v_zm,
-          &mut result,
-          &mut triangulation.triangles,
-        );
-
-        Self::fill_t(
-          center_part_index,
-          cells[c11].corner_part_index,
-          cells[c01].corner_part_index,
-          center_point_index,
-          cells[c11].corner_point_index,
-          cells[c01].corner_point_index,
-          v_ppi,
-          v_ppo,
-          v_mpi,
-          v_mpo,
-          cells[c11].v_mz,
-          cells[c01].v_pz,
-          &mut result,
-          &mut triangulation.triangles,
-        );
-
-        Self::fill_t(
+        self.fill_t(
           center_part_index,
           cells[c01].corner_part_index,
           cells[c00].corner_part_index,
@@ -1440,47 +909,68 @@ impl ContourCreator {
           v_mmo,
           cells[c01].v_zm,
           cells[c00].v_zp,
-          &mut result,
-          &mut triangulation.triangles,
         );
+
+        self.fill_t(
+          center_part_index,
+          cells[c00].corner_part_index,
+          cells[c10].corner_part_index,
+          center_point_index,
+          cells[c00].corner_point_index,
+          cells[c10].corner_point_index,
+          v_mmi,
+          v_mmo,
+          v_pmi,
+          v_pmo,
+          cells[c00].v_pz,
+          cells[c10].v_mz,
+        );
+
+        self.fill_t(
+          center_part_index,
+          cells[c11].corner_part_index,
+          cells[c01].corner_part_index,
+          center_point_index,
+          cells[c11].corner_point_index,
+          cells[c01].corner_point_index,
+          v_ppi,
+          v_ppo,
+          v_mpi,
+          v_mpo,
+          cells[c11].v_mz,
+          cells[c01].v_pz,
+        );
+
+        self.fill_t(
+          center_part_index,
+          cells[c10].corner_part_index,
+          cells[c11].corner_part_index,
+          center_point_index,
+          cells[c10].corner_point_index,
+          cells[c11].corner_point_index,
+          v_pmi,
+          v_pmo,
+          v_ppi,
+          v_ppo,
+          cells[c10].v_zp,
+          cells[c11].v_zm,
+        );
+        self.tmp_buf.extend_bot_rev(&[cells[c00].v_pz, cells[c10].v_mz]);
+        self.tmp_buf.extend_top_rev(&[cells[c01].v_pz, cells[c11].v_mz]);
+        self.tmp_buf.extend_mid(&[cells[c00].v_zp, cells[c01].v_zm]);
+        self.tmp_buf.extend_mid(&[v_mmo, v_mmi, v_mpi, v_mpo]);
+        self.tmp_buf.extend_mid(&[v_pmo, v_pmi, v_ppi, v_ppo]);
+        self.tmp_buf.extend_mid(&[cells[c10].v_zp, cells[c11].v_zm]);
       }
+      let ords = self.order_last_layer_points();
+      self.make_edge_ascending_flags(edge_cursor);
+      self.sort_last_layer_edges(edge_cursor);
+      self.fill_edges_p_left(edge_cursor, ords);
+      self.fill_edges_p_right(edge_cursor, ords);
     }
 
-    let contours = result
-      .into_iter()
-      .map(|(model_index, mut edges)| {
-        let mut parts = FragmentedParts::new();
-
-        let mut points = Vec::new();
-
-        while let Some(&key) = edges.keys().next() {
-          let mut new_contour = Contour::new();
-          let mut current = key;
-          loop {
-            let new_point_index = points.len();
-            points.push(self.points[current as usize]);
-            new_contour.points.push(new_point_index as u32);
-
-            current = edges.remove(&current).unwrap();
-            if current == key {
-              break;
-            }
-          }
-
-          parts.contours.push(new_contour);
-        }
-
-        let contour_set = parts.into_contour_set(points);
-        (model_index, contour_set)
-      })
-      .collect();
-
-    triangulation.points = self.points.clone();
-    let top = triangulation.get_topology();
-
-    println!("vs={}, ts={}", triangulation.points.capacity(), triangulation.triangles.capacity());
-
-    (contours, triangulation)
+    self.topology.validate();
+    self.topology
   }
 }
 
