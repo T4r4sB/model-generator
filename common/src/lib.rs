@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+pub mod bit_buffer;
 pub mod common_for_twisty_puzzles;
 pub mod contour;
 pub mod matrix;
