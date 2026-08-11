@@ -216,7 +216,7 @@ impl ContourTopology {
       let (b, e) = (e.begin, e.end);
       let (b, e) = if b < e { (b, e) } else { (e, b) };
       let mut oldv = buf.upper_bound_included(b);
-      let has_e = buf.contains(e);
+      let was = buf.contains(e);
       buf.put_range(b, e, true, &mut res);
       let mut olde = if oldv == BAD_VERTEX { BAD_EDGE } else { e_in_buf[oldv] };
       if olde != BAD_EDGE {
@@ -228,11 +228,10 @@ impl ContourTopology {
           ord[chains[i]].insert(chains[olde]);
         }
       }
-      if has_e {
-        olde = if e == BAD_VERTEX { BAD_EDGE } else { e_in_buf[e] };
-      }
       e_in_buf[b] = i;
-      e_in_buf[e] = olde;
+      if !was {
+        e_in_buf[e] = olde;
+      }
 
       res.clear();
     }
@@ -265,61 +264,65 @@ impl ContourTopology {
     result
   }
 
+  fn create_chains(edges: &[TopologyEdge], adj_e: &mut [(usize, usize)]) -> (Vec<usize>, usize) {
+    let mut e2chain = Vec::new();
+    e2chain.resize(edges.len(), 0);
+    let mut chain_count = 0;
+
+    for (i, e) in edges.iter().enumerate() {
+      if e.end > e.begin {
+        let prev_e = &edges[adj_e[e.begin].0];
+        if prev_e.end < prev_e.begin {
+          let (mut cur_i, mut cur_e) = (i, *e);
+          loop {
+            e2chain[cur_i] = chain_count;
+            cur_i = adj_e[cur_e.end].1;
+            cur_e = edges[cur_i];
+            if cur_e.end < cur_e.begin {
+              break;
+            }
+          }
+          chain_count += 1;
+        }
+      } else {
+        let prev_e = &edges[adj_e[e.begin].0];
+        if prev_e.end > prev_e.begin {
+          let (mut cur_i, mut cur_e) = (i, *e);
+          loop {
+            e2chain[cur_i] = chain_count;
+            cur_i = adj_e[cur_e.end].1;
+            cur_e = edges[cur_i];
+            if cur_e.end > cur_e.begin {
+              break;
+            }
+          }
+          chain_count += 1;
+        }
+      }
+    }
+    (e2chain, chain_count)
+  }
+
   fn regroup_chains(&mut self) {
     let mut adj_e = Vec::new();
     adj_e.resize(self.vertices.len(), (0, 0));
-    for (&k, edges) in &mut self.edges {
+    for (_, edges) in &mut self.edges {
       for (i, e) in edges.iter().enumerate() {
         adj_e[e.begin].1 = i;
         adj_e[e.end].0 = i;
       }
 
-      let mut chains = Vec::new();
-      chains.resize(edges.len(), 0);
-      let mut chain_count = 0;
-
-      for (i, e) in edges.iter().enumerate() {
-        if e.end > e.begin {
-          let prev_e = &edges[adj_e[e.begin].0];
-          if prev_e.end < prev_e.begin {
-            let (mut cur_i, mut cur_e) = (i, *e);
-            loop {
-              chains[cur_i] = chain_count;
-              cur_i = adj_e[cur_e.end].1;
-              cur_e = edges[cur_i];
-              if cur_e.end < cur_e.begin {
-                break;
-              }
-            }
-            chain_count += 1;
-          }
-        } else {
-          let prev_e = &edges[adj_e[e.begin].0];
-          if prev_e.end > prev_e.begin {
-            let (mut cur_i, mut cur_e) = (i, *e);
-            loop {
-              chains[cur_i] = chain_count;
-              cur_i = adj_e[cur_e.end].1;
-              cur_e = edges[cur_i];
-              if cur_e.end > cur_e.begin {
-                break;
-              }
-            }
-            chain_count += 1;
-          }
-        }
-      }
-
-      let ord = Self::get_chain_comparator(self.vertices.len(), &edges, &chains, chain_count);
+      let (e2chain, chain_count) = Self::create_chains(&edges, &mut adj_e);
+      let ord = Self::get_chain_comparator(self.vertices.len(), &edges, &e2chain, chain_count);
       let sorted_chains = Self::get_sorted_chains(&ord);
-      let mut chains_of_e = Vec::<Vec<usize>>::new();
-      chains_of_e.resize_with(chain_count, Default::default);
+      let mut chain2e = Vec::<Vec<usize>>::new();
+      chain2e.resize_with(chain_count, Default::default);
       for i in 0..edges.len() {
-        chains_of_e[chains[i]].push(i);
+        chain2e[e2chain[i]].push(i);
       }
       let mut fixed = Vec::new();
       for s in sorted_chains {
-        for &e in &chains_of_e[s] {
+        for &e in &chain2e[s] {
           fixed.push(edges[e]);
         }
       }
@@ -347,6 +350,90 @@ impl ContourTopology {
     }
   }
 
+  fn retain_edges_by(edges: &mut Vec<TopologyEdge>, condition: impl Fn(usize)->bool) {
+      let mut j = 0;
+      for i in 0..edges.len() {
+        if condition(i) {
+          edges[j] = edges[i];
+          j += 1;
+        }
+      }
+      edges.truncate(j);
+  }
+
+  fn retain_vertices_by(&mut self, condition: impl Fn(usize)->bool) {
+    let mut fix=Vec::new();
+    fix.resize(self.vertices.len(), 0);
+
+
+    let mut j = 0;
+    for (i, fix) in fix.iter_mut().enumerate() {
+      if condition(i) {
+        *fix = j;
+        self.vertices[j] = self.vertices[i];
+        j += 1;
+      }
+    }
+    self.vertices.truncate(j);
+
+    for (_, edges) in &mut self.edges {
+      for e in edges {
+        e.begin = fix[e.begin];
+        e.end = fix[e.end];
+      }
+    }
+  }
+
+  pub fn remove_trash(&mut self) {
+    let mut next = Vec::new();
+    next.resize(self.vertices.len(), BAD_VERTEX);
+    #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+    enum EdgeResult {
+      UNKNOWN,
+      BAD,
+      GOOD,
+    };
+    let mut visited = Vec::new();
+    let mut skipped_v = Vec::new();
+    let mut in_process = Vec::new();
+
+    skipped_v.resize(self.vertices.len(), false);
+
+    for (&part, edges) in &mut self.edges {
+      for (i, e) in edges.iter().enumerate() {
+        next[e.begin] = i;
+      }
+      visited.resize(edges.len(), EdgeResult::UNKNOWN);
+      for i in 0..edges.len() {
+        if visited[i] != EdgeResult::UNKNOWN {
+          continue;
+        }
+        let mut sq = 0.0;
+        let mut cur = i;
+        loop {
+          let e = edges[cur];
+          in_process.push(cur);
+          sq += cross(self.vertices[e.begin], self.vertices[e.end]);
+          cur = next[e.end];
+          if cur == i {
+            break;
+          }
+        }
+        let bad = sq.abs() < 5.0;
+        for &e in &in_process {
+          visited[e] = if bad { EdgeResult::BAD } else { EdgeResult::GOOD };
+          skipped_v[edges[e].begin] = bad;
+        }
+
+        in_process.clear();
+      }
+
+      Self::retain_edges_by(edges, |i| visited[i] == EdgeResult::GOOD);
+      visited.clear();
+    }
+    self.retain_vertices_by(|i| !skipped_v[i]);
+  }
+
   pub fn optimize(&mut self, treshhold: f32) {
     #[derive(Copy, Clone, Debug)]
     struct VInfo {
@@ -361,7 +448,7 @@ impl ContourTopology {
     );
     let mut skipped_edges = Vec::new();
 
-    for (&k, edges) in &mut self.edges {
+    for (_, edges) in &mut self.edges {
       skipped_edges.resize(edges.len(), false);
 
       for (i, e) in edges.iter().enumerate() {
@@ -406,32 +493,11 @@ impl ContourTopology {
         }
       }
 
-      let mut j = 0;
-      for i in 0..edges.len() {
-        if !skipped_edges[i] {
-          edges[j] = edges[i];
-          j += 1;
-        }
-      }
-      edges.truncate(j);
+
+      Self::retain_edges_by(edges, |i| !skipped_edges[i]);
     }
 
-    let mut j = 0;
-    for (i, n) in next.iter_mut().enumerate() {
-      if !n.skipped {
-        n.next_v = j;
-        self.vertices[j] = self.vertices[i];
-        j += 1;
-      }
-    }
-    self.vertices.truncate(j);
-
-    for (&k, edges) in &mut self.edges {
-      for e in edges {
-        e.begin = next[e.begin].next_v;
-        e.end = next[e.end].next_v;
-      }
-    }
+    self.retain_vertices_by(|i| !next[i].skipped);
   }
 
   pub fn get(&self) -> FxHashMap<PartIndex, Contours> {
