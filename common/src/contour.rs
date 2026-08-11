@@ -1,7 +1,8 @@
+use crate::bit_buffer::*;
 use crate::points2d::*;
-use dxf::Drawing;
 use dxf::entities::*;
 use dxf::objects::*;
+use dxf::Drawing;
 use fxhash::FxHashMap;
 use std::collections::HashMap;
 use std::default;
@@ -199,134 +200,90 @@ impl ContourTopology {
     Self { vertices: Vec::new(), edges: FxHashMap::default() }
   }
 
-  fn get_chain_comparator(
-    vsz: usize,
-    edges: &[TopologyEdge],
-    chains: &[usize],
-    chain_count: usize,
-  ) -> Vec<fxhash::FxHashSet<usize>> {
-    let mut ord = Vec::<fxhash::FxHashSet<usize>>::new();
-    ord.resize_with(chain_count, Default::default);
-    let mut buf = BitBuffer::new();
-    buf.resize(vsz);
-    let mut e_in_buf = Vec::new();
-    e_in_buf.resize(vsz, BAD_EDGE);
-    let mut res = Vec::new();
-    for (i, e) in edges.iter().enumerate() {
-      let (b, e) = (e.begin, e.end);
-      let (b, e) = if b < e { (b, e) } else { (e, b) };
-      let mut oldv = buf.upper_bound_included(b);
-      let was = buf.contains(e);
-      buf.put_range(b, e, true, &mut res);
-      let mut olde = if oldv == BAD_VERTEX { BAD_EDGE } else { e_in_buf[oldv] };
-      if olde != BAD_EDGE {
-        ord[chains[i]].insert(chains[olde]);
-      }
-      for &r in &res {
-        olde = e_in_buf[r];
-        if olde != BAD_EDGE {
-          ord[chains[i]].insert(chains[olde]);
-        }
-      }
-      e_in_buf[b] = i;
-      if !was {
-        e_in_buf[e] = olde;
-      }
-
-      res.clear();
-    }
-    ord
-  }
-
-  fn get_sorted_chains_impl(
-    ord: &[fxhash::FxHashSet<usize>],
-    current: usize,
-    visited: &mut [bool],
-    result: &mut Vec<usize>,
-  ) {
-    if visited[current] {
-      return;
-    }
-    visited[current] = true;
-    for &next in &ord[current] {
-      Self::get_sorted_chains_impl(ord, next, visited, result);
-    }
-    result.push(current);
-  }
-
-  fn get_sorted_chains(ord: &[fxhash::FxHashSet<usize>]) -> Vec<usize> {
-    let mut visited = Vec::new();
-    visited.resize(ord.len(), false);
-    let mut result = Vec::with_capacity(ord.len());
-    for i in 0..ord.len() {
-      Self::get_sorted_chains_impl(ord, i, &mut visited, &mut result);
-    }
-    result
-  }
-
-  fn create_chains(edges: &[TopologyEdge], adj_e: &mut [(usize, usize)]) -> (Vec<usize>, usize) {
-    let mut e2chain = Vec::new();
-    e2chain.resize(edges.len(), 0);
-    let mut chain_count = 0;
-
-    for (i, e) in edges.iter().enumerate() {
-      if e.end > e.begin {
-        let prev_e = &edges[adj_e[e.begin].0];
-        if prev_e.end < prev_e.begin {
-          let (mut cur_i, mut cur_e) = (i, *e);
-          loop {
-            e2chain[cur_i] = chain_count;
-            cur_i = adj_e[cur_e.end].1;
-            cur_e = edges[cur_i];
-            if cur_e.end < cur_e.begin {
-              break;
-            }
-          }
-          chain_count += 1;
-        }
-      } else {
-        let prev_e = &edges[adj_e[e.begin].0];
-        if prev_e.end > prev_e.begin {
-          let (mut cur_i, mut cur_e) = (i, *e);
-          loop {
-            e2chain[cur_i] = chain_count;
-            cur_i = adj_e[cur_e.end].1;
-            cur_e = edges[cur_i];
-            if cur_e.end > cur_e.begin {
-              break;
-            }
-          }
-          chain_count += 1;
-        }
-      }
-    }
-    (e2chain, chain_count)
-  }
-
   fn regroup_chains(&mut self) {
     let mut adj_e = Vec::new();
     adj_e.resize(self.vertices.len(), (0, 0));
+    let mut sorted_v = Vec::new();
+    let mut e2chain = Vec::new();
+    #[derive(Debug, Copy, Clone)]
+    struct ChainInfo {
+      first_e: usize,
+      last_e: usize,
+      next_chain: usize,
+    };
+    let mut chains = Vec::<ChainInfo>::new();
     for (_, edges) in &mut self.edges {
+      let mut sorted_e = BitBuffer::new(edges.len());
       for (i, e) in edges.iter().enumerate() {
         adj_e[e.begin].1 = i;
         adj_e[e.end].0 = i;
+        sorted_v.push(e.begin);
       }
-
-      let (e2chain, chain_count) = Self::create_chains(&edges, &mut adj_e);
-      let ord = Self::get_chain_comparator(self.vertices.len(), &edges, &e2chain, chain_count);
-      let sorted_chains = Self::get_sorted_chains(&ord);
-      let mut chain2e = Vec::<Vec<usize>>::new();
-      chain2e.resize_with(chain_count, Default::default);
-      for i in 0..edges.len() {
-        chain2e[e2chain[i]].push(i);
-      }
-      let mut fixed = Vec::new();
-      for s in sorted_chains {
-        for &e in &chain2e[s] {
-          fixed.push(edges[e]);
+      sorted_v.sort();
+      chains.push(ChainInfo { first_e: BAD_EDGE, last_e: BAD_EDGE, next_chain: BAD_EDGE });
+      e2chain.resize(edges.len(), usize::MAX);
+      for &v in &sorted_v {
+        let adj = adj_e[v];
+        let e_from = edges[adj.0];
+        let e_to = edges[adj.1];
+        if e_from.begin > v {
+          if e_to.end > v {
+            // new chains
+            let (l, r) = if adj.0 < adj.1 { (adj.0, adj.1) } else { (adj.1, adj.0) };
+            let prev_e = sorted_e.upper_bound_included(l, BAD_EDGE);
+            let prev_chain = if prev_e == BAD_EDGE { 0 } else { e2chain[prev_e] };
+            let cl = chains.len();
+            e2chain[l] = cl;
+            e2chain[r] = cl + 1;
+            chains.push(ChainInfo { first_e: l, last_e: BAD_EDGE, next_chain: cl + 1 });
+            chains.push(ChainInfo {
+              first_e: r,
+              last_e: BAD_EDGE,
+              next_chain: chains[prev_chain].next_chain,
+            });
+            chains[prev_chain].next_chain = cl;
+            sorted_e.put_number(l);
+            sorted_e.put_number(r);
+          } else {
+            sorted_e.remove_number(adj.1);
+            sorted_e.put_number(adj.0);
+            e2chain[adj.0] = e2chain[adj.1];
+          }
+        } else {
+          if e_to.end > v {
+            sorted_e.remove_number(adj.0);
+            sorted_e.put_number(adj.1);
+            e2chain[adj.1] = e2chain[adj.0];
+          } else {
+            // end chains
+            sorted_e.remove_number(adj.0);
+            sorted_e.remove_number(adj.1);
+            chains[e2chain[adj.0]].last_e = adj.0;
+            chains[e2chain[adj.1]].last_e = adj.1;
+          }
         }
       }
+      let mut cn = chains[0].next_chain;
+      let mut fixed = Vec::new();
+      while cn != BAD_EDGE {
+        let chain = chains[cn];
+        let mut edge_index = chain.first_e;
+        loop {
+          let e = edges[edge_index];
+          fixed.push(e);
+          if edge_index == chain.last_e {
+            break;
+          }
+          edge_index = if e.begin < e.end { adj_e[e.end].1 } else { adj_e[e.begin].0 };
+        }
+        cn = chain.next_chain;
+      }
       *edges = fixed;
+
+      e2chain.clear();
+      chains.clear();
+      sorted_v.clear();
+      sorted_e.clear();
     }
   }
 
@@ -350,21 +307,20 @@ impl ContourTopology {
     }
   }
 
-  fn retain_edges_by(edges: &mut Vec<TopologyEdge>, condition: impl Fn(usize)->bool) {
-      let mut j = 0;
-      for i in 0..edges.len() {
-        if condition(i) {
-          edges[j] = edges[i];
-          j += 1;
-        }
+  fn retain_edges_by(edges: &mut Vec<TopologyEdge>, condition: impl Fn(usize) -> bool) {
+    let mut j = 0;
+    for i in 0..edges.len() {
+      if condition(i) {
+        edges[j] = edges[i];
+        j += 1;
       }
-      edges.truncate(j);
+    }
+    edges.truncate(j);
   }
 
-  fn retain_vertices_by(&mut self, condition: impl Fn(usize)->bool) {
-    let mut fix=Vec::new();
+  fn retain_vertices_by(&mut self, condition: impl Fn(usize) -> bool) {
+    let mut fix = Vec::new();
     fix.resize(self.vertices.len(), 0);
-
 
     let mut j = 0;
     for (i, fix) in fix.iter_mut().enumerate() {
@@ -493,7 +449,6 @@ impl ContourTopology {
         }
       }
 
-
       Self::retain_edges_by(edges, |i| !skipped_edges[i]);
     }
 
@@ -540,12 +495,10 @@ impl ContourTopology {
 
   pub fn get_triangles(&self) -> FxHashMap<PartIndex, Triangulation> {
     let mut result = FxHashMap::default();
-    let mut bit_buf = BitBuffer::new();
-    let mut loc_buf = BitBuffer::new();
+    let mut bit_buf = BitBuffer::new(self.vertices.len());
+    let mut loc_buf = BitBuffer::new(self.vertices.len());
     let mut vis = Vec::new();
 
-    bit_buf.resize(self.vertices.len());
-    loc_buf.resize(self.vertices.len());
     for (&part, e) in &self.edges {
       let mut triangles = Vec::new();
 
@@ -597,156 +550,6 @@ impl ContourTopology {
     result
   }
 }
-
-/// Uses some features of BTreeMap, but faster
-/// For put_range:
-/// On 1000 elements x25 times faster
-/// On 10_000 elements x5.4 times faster
-/// On 100_000 elements the same speed
-/// For remove_number_get_adj:
-/// On 1000-100000 elements x50-x100 times faster
-#[derive(Debug, Clone)]
-struct BitBuffer {
-  elements: Vec<usize>,
-}
-
-impl BitBuffer {
-  fn new() -> Self {
-    Self { elements: Vec::new() }
-  }
-
-  fn clear(&mut self) {
-    for e in &mut self.elements {
-      *e = 0;
-    }
-  }
-
-  fn resize(&mut self, new_len: usize) {
-    let bsz = usize::BITS as usize;
-    let new_len = new_len.div_ceil(bsz);
-    self.elements.resize(new_len, 0);
-  }
-
-  fn put_number(&mut self, number: usize) {
-    let mask = usize::BITS as usize - 1;
-    let bsz = usize::BITS as usize;
-    let n = number / bsz;
-    let nn = number & mask;
-    self.elements[n] |= 1 << nn;
-  }
-
-  fn remove_number(&mut self, number: usize) {
-    let mask = usize::BITS as usize - 1;
-    let bsz = usize::BITS as usize;
-    let n = number / bsz;
-    let nn = number & mask;
-    self.elements[n] &= !(1 << nn);
-  }
-
-  fn contains(&mut self, number: usize) -> bool {
-    let mask = usize::BITS as usize - 1;
-    let bsz = usize::BITS as usize;
-    let n = number / bsz;
-    let nn = number & mask;
-    self.elements[n] & (1 << nn) != 0
-  }
-
-  fn remove_number_get_adj(&mut self, number: usize) -> (usize, usize) {
-    let mask = usize::BITS as usize - 1;
-    let bsz = usize::BITS as usize;
-    let n = number / bsz;
-    let nn = number & mask;
-    self.elements[n] &= !(1 << nn);
-    let mut result = (0, 0);
-    let mut check = self.elements[n] & !((1 << nn) - 1);
-    let mut i = n;
-    loop {
-      if check != 0 {
-        result.1 = check.trailing_zeros() as usize + i * bsz;
-        break;
-      }
-      i += 1;
-      check = self.elements[i];
-    }
-    let mut check = self.elements[n] & ((1 << nn) - 1);
-    let mut i = n;
-    loop {
-      if check != 0 {
-        result.0 = 63 - check.leading_zeros() as usize + i * bsz;
-        break;
-      }
-      i -= 1;
-      check = self.elements[i];
-    }
-
-    result
-  }
-
-  fn upper_bound_included(&mut self, number: usize) -> usize {
-    let mask = usize::BITS as usize - 1;
-    let bsz = usize::BITS as usize;
-    let mut n = number / bsz;
-    let nn = number & mask;
-    let mut check = self.elements[n] & !((usize::MAX << nn) << 1);
-    loop {
-      if check != 0 {
-        return 63 - check.leading_zeros() as usize + n * bsz;
-      }
-      if n == 0 {
-        return BAD_VERTEX;
-      }
-      n -= 1;
-      check = self.elements[n];
-    }
-  }
-
-  fn put_range(
-    &mut self,
-    mut begin: usize,
-    mut end: usize,
-    use_result: bool,
-    result: &mut Vec<usize>,
-  ) {
-    if begin > end {
-      (begin, end) = (end, begin);
-    }
-
-    let mask = usize::BITS as usize - 1;
-    let bsz = usize::BITS as usize;
-    let b = begin / bsz;
-    let bn = begin & mask;
-    let e = end / bsz;
-    let en = end & mask;
-
-    let mut push_bits = |pat: &mut usize, mask: usize, new_bits: usize, offset: usize| {
-      if use_result {
-        let mut p = *pat & mask;
-        while p != 0 {
-          let bit = p.trailing_zeros() as usize;
-          result.push(offset + bit);
-          p -= 1 << bit;
-        }
-      }
-      *pat = *pat & !mask | new_bits;
-    };
-
-    if b == e {
-      let be_mask = (1 << en) - (1 << (bn + 1));
-      push_bits(&mut self.elements[b], be_mask, 1 << bn | 1 << en, b * bsz);
-      self.elements[b] &= !be_mask;
-      self.elements[b] |= 1 << bn | 1 << en;
-    } else {
-      let b_mask = (usize::MAX << bn) << 1;
-      push_bits(&mut self.elements[b], b_mask, 1 << bn, b * bsz);
-      for cb in b + 1..e {
-        push_bits(&mut self.elements[cb], usize::MAX, 0, cb * bsz);
-      }
-      let e_mask = (1 << en) - 1;
-      push_bits(&mut self.elements[e], e_mask, 1 << en, e * bsz);
-    }
-  }
-}
-
 struct OrdBuffer {
   v: Vec<usize>,
   l: Vec<usize>,
