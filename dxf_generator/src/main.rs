@@ -9,12 +9,13 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 
-mod chaingear_creator;
-type PartCreator = chaingear_creator::ChaingearCreator;
+//mod chaingear_creator;
+//type PartCreator = chaingear_creator::ChaingearCreator;
 
-//mod clickbox2_creator;
-//type PartCreator = clickbox2_creator::ClickboxCreator;
+mod clickbox2_creator;
+type PartCreator = clickbox2_creator::ClickboxCreator;
 
+/*
 pub struct ImgBuffer {
   v: Vec<u8>,
   size_x: usize,
@@ -435,6 +436,7 @@ fn create_mockup() {
   }
   common.save_to_dxf(std::path::Path::new("common.dxf")).unwrap();
 }
+*/
 
 fn main() {
   let start = Instant::now();
@@ -443,70 +445,63 @@ fn main() {
   let mut total_length = 0.0;
   let mut total_square = 0.0;
 
-  let mut look_together = ContourSet::new();
+  // let mut look_together = ContourSet::new();
 
   for i in 0..part_creator.faces() {
     let aabb = part_creator.aabb(i).unwrap_or(AABB::around_zero(200.0));
 
-    let mut cc = ContourCreator::new(aabb, 0.2, 10);
 
     let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
+    if name != "handle_cup" {
+      continue;
+    }
     print!("generate {name} in aabb {:?}...", aabb);
     std::io::stdout().flush().unwrap();
 
-    let contours = cc.make_contour(&|p| part_creator.get_sticker_index(p, i));
+    let mut cc = ContourCreator::new(aabb, 0.2, 10);
+    let mut topologys = cc.make_topology(&|p| part_creator.get_sticker_index(p, i));
+
     let h = part_creator.get_height(i);
-
-    let thickness = h;
     let count = part_creator.get_count(i);
-    let full_name = format!("(THICK={thickness}, AMOUNT={count}) {name}");
-
-    let single_i = contours.len() == 1;
-    for (index, mut cc) in contours {
-      cc.optimize(0.001);
-      cc.remove_trash();
-
-      if name == "gear1" || name == "gear2" {
-        println!("append together");
-        look_together.append(cc.clone());
-      }
-
-      let full_name = if single_i { full_name.clone() } else { format!("{full_name}_{index}") };
-
-      let square = cc.get_square();
-      let length = cc.get_length();
+    let full_name = format!("(THICK={h}, AMOUNT={count}) {name}");
+    let single_i = topologys.len() == 1;
+    for (k, mut topology) in topologys {
+      topology.optimize(0.1);
+      topology.remove_trash();
+      let figure = topology.to_flat_figure();
+      let full_name = if single_i { full_name.clone() } else { format!("{full_name}_{k}") };
+      let square = figure.get_square();
+      let length = figure.get_length();
 
       total_length += length * count as f32;
       total_square += square * count as f32;
 
       println!(
         "\rsave {full_name} ({} points, {square} square, {length} length) to dxf...",
-        cc.points_count()
+        figure.points_count()
       );
+
       if let Err(msg) =
-        cc.save_to_dxf(&std::path::Path::new("contours").join(format!("{full_name}.dxf")))
+        figure.save_to_dxf(&std::path::Path::new("contours").join(format!("{full_name}.dxf")))
       {
         println!("{}", msg);
       }
 
-      /*
-      let ex = cc.extrude(h);
-
-      let single_j = ex.len() == 1;
-      for j in 0..ex.len() {
-        let full_name = if single_j { full_name.clone() } else { format!("{full_name}_{j}") };
-
-        if let Err(msg) =
-          ex[j].save_to_stl(&std::path::Path::new("extruded").join(format!("{full_name}.stl")))
-        {
-          println!("{}", msg);
-        }
+      let ex = figure.extrude(h);
+      if let Err(msg) =
+        ex.save_to_stl(&std::path::Path::new("extruded").join(format!("{full_name}.stl")))
+      {
+        println!("{}", msg);
       }
-      */
+
+      let cc = figure.generate_triangle_contours();
+      if let Err(msg) =
+        cc.save_to_dxf(&std::path::Path::new("contours").join(format!("{full_name}_TR.dxf")))
+      {
+        println!("{}", msg);
+      }
     }
   }
-
-  let _ = look_together.save_to_dxf(&std::path::Path::new("contours").join(("TOGETHER.dxf")));
 
   println!("total {total_length} length, {total_square} square");
   println!("time {}", start.elapsed().as_millis() as f32 / 1000.0);

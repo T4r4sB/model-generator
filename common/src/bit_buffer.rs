@@ -42,14 +42,6 @@ impl BitBuffer {
     self.elements[n] &= !(1 << nn);
   }
 
-  pub fn contains(&mut self, number: usize) -> bool {
-    let mask = usize::BITS as usize - 1;
-    let bsz = usize::BITS as usize;
-    let n = number / bsz;
-    let nn = number & mask;
-    self.elements[n] & (1 << nn) != 0
-  }
-
   pub fn remove_number_get_adj(&mut self, number: usize) -> (usize, usize) {
     let mask = usize::BITS as usize - 1;
     let bsz = usize::BITS as usize;
@@ -81,7 +73,7 @@ impl BitBuffer {
     result
   }
 
-  pub fn upper_bound_included(&mut self, number: usize, if_fail: usize) -> usize {
+  pub fn upper_bound(&mut self, number: usize, if_fail: usize) -> usize {
     let mask = usize::BITS as usize - 1;
     let bsz = usize::BITS as usize;
     let mut n = number / bsz;
