@@ -65,6 +65,10 @@ impl Contour {
 }
 
 impl FlatFigure {
+  pub fn new() -> Self {
+    Self { contours: Vec::new(), triangles: Vec::new() }
+  }
+
   pub fn get_square(&self) -> f32 {
     self.contours.iter().map(|c| c.get_square()).sum()
   }
@@ -170,16 +174,12 @@ impl FlatFigure {
     &self.contours
   }
 
-  pub fn from_all(all: &FxHashMap<PartIndex, Self>) -> Self {
-    let mut contours = Vec::new();
-    let mut triangles = Vec::new();
-    let mut offset = 0;
-    for (_, t) in all {
-      contours.extend(t.contours.clone());
-      triangles.extend(t.triangles.iter().map(|t| [t[0] + offset, t[1] + offset, t[2] + offset]));
-      offset += t.points_count();
-    }
-    Self { triangles, contours }
+  pub fn extend(&mut self, other: Self) {
+    let mut offset = self.points_count();
+    self.contours.extend(other.contours.clone());
+    self
+      .triangles
+      .extend(other.triangles.iter().map(|t| [t[0] + offset, t[1] + offset, t[2] + offset]));
   }
 
   pub fn extrude(&self, width: f32) -> crate::model::Model {
@@ -269,7 +269,12 @@ impl ContourTopology {
       }
     }
 
-    fn get_prev_chain(edge: usize, sorted_e: &BitBuffer, if_fail: usize, e2c: &mut [usize]) -> usize {
+    fn get_prev_chain(
+      edge: usize,
+      sorted_e: &BitBuffer,
+      if_fail: usize,
+      e2c: &mut [usize],
+    ) -> usize {
       let prev_e = sorted_e.upper_bound(edge, BAD_EDGE);
       if prev_e == BAD_EDGE { if_fail } else { get_e2c(prev_e, e2c) }
     }
@@ -283,21 +288,21 @@ impl ContourTopology {
           // new chains
           let (l, r) = (adj.edge_from, adj.edge_to);
           let (l, r) = if l < r { (l, r) } else { (r, l) };
-          let prev_c = get_prev_chain(l, &sorted_e, self.edges.len(), &mut e2c );
+          let prev_c = get_prev_chain(l, &sorted_e, self.edges.len(), &mut e2c);
           insert(prev_c, r, &mut chains, &mut e2c);
           insert(prev_c, l, &mut chains, &mut e2c);
           sorted_e.put_number(l);
           sorted_e.put_number(r);
         } else {
           sorted_e.remove_number(adj.edge_to);
-          let prev_c = get_prev_chain(adj.edge_to, &sorted_e, self.edges.len(), &mut e2c );
+          let prev_c = get_prev_chain(adj.edge_to, &sorted_e, self.edges.len(), &mut e2c);
           insert(prev_c, adj.edge_from, &mut chains, &mut e2c);
           sorted_e.put_number(adj.edge_from);
         }
       } else {
         if e_to.begin > v {
           sorted_e.remove_number(adj.edge_from);
-          let prev_c = get_prev_chain(adj.edge_from, &sorted_e, self.edges.len(), &mut e2c );
+          let prev_c = get_prev_chain(adj.edge_from, &sorted_e, self.edges.len(), &mut e2c);
           insert(prev_c, adj.edge_to, &mut chains, &mut e2c);
           sorted_e.put_number(adj.edge_to);
         } else {
