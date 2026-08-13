@@ -5,15 +5,16 @@ use common::points2d::*;
 use rand::Rng;
 use rand::SeedableRng;
 use std::io::Write;
+use std::ops::DerefMut;
 use std::time::Instant;
 
 use fxhash::FxHashMap;
 
-//mod chaingear_creator;
-//type PartCreator = chaingear_creator::ChaingearCreator;
+mod chaingear_creator;
+type PartCreator = chaingear_creator::ChaingearCreator;
 
-mod clickbox2_creator;
-type PartCreator = clickbox2_creator::ClickboxCreator;
+//mod clickbox2_creator;
+//type PartCreator = clickbox2_creator::ClickboxCreator;
 
 /*
 pub struct ImgBuffer {
@@ -450,11 +451,7 @@ fn main() {
   for i in 0..part_creator.faces() {
     let aabb = part_creator.aabb(i).unwrap_or(AABB::around_zero(200.0));
 
-
     let name = part_creator.get_name(i).map(|s| s.to_string()).unwrap_or(format!("part_{i}"));
-    if name != "handle_cup" {
-      continue;
-    }
     print!("generate {name} in aabb {:?}...", aabb);
     std::io::stdout().flush().unwrap();
 
@@ -466,8 +463,9 @@ fn main() {
     let full_name = format!("(THICK={h}, AMOUNT={count}) {name}");
     let single_i = topologys.len() == 1;
     for (k, mut topology) in topologys {
-      topology.optimize(0.1);
+      topology.optimize(0.01);
       topology.remove_trash();
+
       let figure = topology.to_flat_figure();
       let full_name = if single_i { full_name.clone() } else { format!("{full_name}_{k}") };
       let square = figure.get_square();

@@ -1,7 +1,7 @@
-use crate::points2d::*;
-use crate::solid::*;
+use common::points2d::*;
+use common::solid::*;
 
-use crate::slots_and_holes::*;
+use common::slots_and_holes::*;
 
 pub struct WatchesCreator {
   builder: Builder,
@@ -275,10 +275,14 @@ impl WatchesCreator {
   }
 
   pub fn get_sticker_index(&self, pos: Point, current_normal: usize) -> PartIndex {
-    self.builder.contains(current_normal, pos) as PartIndex
+    self.builder.contains(pos, current_normal) as PartIndex
   }
 
-  pub fn get_part_index(&self, pos: crate::points3d::Point) -> PartIndex {
+  pub fn get_part_index(&self, pos: common::points3d::Point) -> PartIndex {
     return 0;
+  }
+
+  pub fn aabb(&self, part_index: usize) -> Option<AABB> {
+    Some(self.builder.aabb(part_index))
   }
 }

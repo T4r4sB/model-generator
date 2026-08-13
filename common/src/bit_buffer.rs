@@ -20,6 +20,19 @@ impl BitBuffer {
     Self { elements }
   }
 
+  pub fn print_content(&self) {
+    let bsz = usize::BITS as usize;
+    for (i, el) in self.elements.iter().enumerate() {
+      let mut bits = *el;
+      while bits != 0 {
+        let z = bits.trailing_zeros() as usize;
+        print!("{}, ", z + i * bsz);
+        bits -= 1 << z;
+      }
+    }
+    println!();
+  }
+
   pub fn clear(&mut self) {
     for e in &mut self.elements {
       *e = 0;
@@ -73,7 +86,7 @@ impl BitBuffer {
     result
   }
 
-  pub fn upper_bound(&mut self, number: usize, if_fail: usize) -> usize {
+  pub fn upper_bound(&self, number: usize, if_fail: usize) -> usize {
     let mask = usize::BITS as usize - 1;
     let bsz = usize::BITS as usize;
     let mut n = number / bsz;

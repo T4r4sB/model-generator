@@ -479,11 +479,7 @@ impl ControlLine {
       return false;
     }
 
-    if self.mid.get(pt) > 0.0 {
-      self.start.get(pt) > 0.0
-    } else {
-      self.end.get(pt) > 0.0
-    }
+    if self.mid.get(pt) > 0.0 { self.start.get(pt) > 0.0 } else { self.end.get(pt) > 0.0 }
   }
 }
 
@@ -530,11 +526,7 @@ impl SlotArc {
       let p = get_p(d, p) - center;
 
       let l = p.len();
-      if l == 0.0 {
-        Point::X.scale(dl) + center
-      } else {
-        p.scale(1.0 + dl / l) + center
-      }
+      if l == 0.0 { Point::X.scale(dl) + center } else { p.scale(1.0 + dl / l) + center }
     };
 
     let start = get_p(0.0, 0.0);

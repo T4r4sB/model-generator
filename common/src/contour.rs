@@ -1,8 +1,8 @@
 use crate::bit_buffer::*;
 use crate::points2d::*;
+use dxf::Drawing;
 use dxf::entities::*;
 use dxf::objects::*;
-use dxf::Drawing;
 use fxhash::FxHashMap;
 use std::collections::HashMap;
 use std::default;
@@ -231,85 +231,100 @@ impl ContourTopology {
     Self { vertices: Vec::new(), edges: Vec::new() }
   }
 
-  fn regroup_chains(&mut self) {
+  fn regroup_chains(&mut self, fixed_edges: Vec<Edge>, mut e2c: Vec<usize>) {
+    #[derive(Copy, Clone, Debug)]
+    struct VInfo {
+      edge_from: usize,
+      edge_to: usize,
+    }
     let mut adj_e = Vec::new();
-    adj_e.resize(self.vertices.len(), (0, 0));
-    let mut sorted_v = Vec::new();
-    let mut e2chain = Vec::new();
-    #[derive(Debug, Copy, Clone)]
-    struct ChainInfo {
-      first_e: usize,
-      last_e: usize,
-      next_chain: usize,
+    adj_e.resize(self.vertices.len(), VInfo { edge_from: BAD_EDGE, edge_to: BAD_EDGE });
+    for (i, e) in self.edges.iter().enumerate() {
+      adj_e[e.begin].edge_from = i;
+      adj_e[e.end].edge_to = i;
+    }
+
+    let mut chains = Vec::new();
+    const FINISH: usize = BAD_EDGE - 1;
+    chains.resize(self.edges.len() + 1, BAD_EDGE);
+    chains[self.edges.len()] = FINISH;
+
+    fn get_e2c(e: usize, e2c: &mut [usize]) -> usize {
+      let mut r = e2c[e];
+      if r == BAD_EDGE {
+        return e;
+      }
+      r = get_e2c(r, e2c);
+      e2c[e] = r;
+      return r;
     };
-    let mut chains = Vec::<ChainInfo>::new();
 
     let mut sorted_e = BitBuffer::new(self.edges.len());
-    for (i, e) in self.edges.iter().enumerate() {
-      adj_e[e.begin].1 = i;
-      adj_e[e.end].0 = i;
-      sorted_v.push(e.begin);
+
+    fn insert(c_after: usize, e_new: usize, chains: &mut [usize], e2c: &mut [usize]) {
+      let c_new = get_e2c(e_new, e2c);
+      if chains[c_new] == BAD_EDGE {
+        chains[c_new] = chains[c_after];
+        chains[c_after] = c_new;
+      }
     }
-    sorted_v.sort();
-    chains.push(ChainInfo { first_e: BAD_EDGE, last_e: BAD_EDGE, next_chain: BAD_EDGE });
-    e2chain.resize(self.edges.len(), usize::MAX);
-    for &v in &sorted_v {
+
+    fn get_prev_chain(edge: usize, sorted_e: &BitBuffer, if_fail: usize, e2c: &mut [usize]) -> usize {
+      let prev_e = sorted_e.upper_bound(edge, BAD_EDGE);
+      if prev_e == BAD_EDGE { if_fail } else { get_e2c(prev_e, e2c) }
+    }
+
+    for v in 0..self.vertices.len() {
       let adj = adj_e[v];
-      let e_from = self.edges[adj.0];
-      let e_to = self.edges[adj.1];
-      if e_from.begin > v {
-        if e_to.end > v {
+      let e_from = self.edges[adj.edge_from];
+      let e_to = self.edges[adj.edge_to];
+      if e_from.end > v {
+        if e_to.begin > v {
           // new chains
-          let (l, r) = if adj.0 < adj.1 { (adj.0, adj.1) } else { (adj.1, adj.0) };
-          let prev_e = sorted_e.upper_bound(l, BAD_EDGE);
-          let prev_chain = if prev_e == BAD_EDGE { 0 } else { e2chain[prev_e] };
-          let cl = chains.len();
-          e2chain[l] = cl;
-          e2chain[r] = cl + 1;
-          chains.push(ChainInfo { first_e: l, last_e: BAD_EDGE, next_chain: cl + 1 });
-          chains.push(ChainInfo {
-            first_e: r,
-            last_e: BAD_EDGE,
-            next_chain: chains[prev_chain].next_chain,
-          });
-          chains[prev_chain].next_chain = cl;
+          let (l, r) = (adj.edge_from, adj.edge_to);
+          let (l, r) = if l < r { (l, r) } else { (r, l) };
+          let prev_c = get_prev_chain(l, &sorted_e, self.edges.len(), &mut e2c );
+          insert(prev_c, r, &mut chains, &mut e2c);
+          insert(prev_c, l, &mut chains, &mut e2c);
           sorted_e.put_number(l);
           sorted_e.put_number(r);
         } else {
-          sorted_e.remove_number(adj.1);
-          sorted_e.put_number(adj.0);
-          e2chain[adj.0] = e2chain[adj.1];
+          sorted_e.remove_number(adj.edge_to);
+          let prev_c = get_prev_chain(adj.edge_to, &sorted_e, self.edges.len(), &mut e2c );
+          insert(prev_c, adj.edge_from, &mut chains, &mut e2c);
+          sorted_e.put_number(adj.edge_from);
         }
       } else {
-        if e_to.end > v {
-          sorted_e.remove_number(adj.0);
-          sorted_e.put_number(adj.1);
-          e2chain[adj.1] = e2chain[adj.0];
+        if e_to.begin > v {
+          sorted_e.remove_number(adj.edge_from);
+          let prev_c = get_prev_chain(adj.edge_from, &sorted_e, self.edges.len(), &mut e2c );
+          insert(prev_c, adj.edge_to, &mut chains, &mut e2c);
+          sorted_e.put_number(adj.edge_to);
         } else {
           // end chains
-          sorted_e.remove_number(adj.0);
-          sorted_e.remove_number(adj.1);
-          chains[e2chain[adj.0]].last_e = adj.0;
-          chains[e2chain[adj.1]].last_e = adj.1;
+          sorted_e.remove_number(adj.edge_from);
+          sorted_e.remove_number(adj.edge_to);
         }
       }
     }
-    let mut cn = chains[0].next_chain;
-    let mut fixed = Vec::new();
-    while cn != BAD_EDGE {
-      let chain = chains[cn];
-      let mut edge_index = chain.first_e;
-      loop {
-        let e = self.edges[edge_index];
-        fixed.push(e);
-        if edge_index == chain.last_e {
-          break;
-        }
-        edge_index = if e.begin < e.end { adj_e[e.end].1 } else { adj_e[e.begin].0 };
-      }
-      cn = chain.next_chain;
+    let mut ch = chains[self.edges.len()];
+    self.edges.clear();
+    while ch != FINISH {
+      self.edges.push(fixed_edges[ch]);
+      ch = chains[ch];
     }
-    self.edges = fixed;
+
+    adj_e.clear();
+    adj_e.resize(self.vertices.len(), VInfo { edge_from: BAD_EDGE, edge_to: BAD_EDGE });
+    for (i, e) in self.edges.iter().enumerate() {
+      assert!(adj_e[e.begin].edge_from == BAD_EDGE);
+      assert!(adj_e[e.end].edge_to == BAD_EDGE);
+      adj_e[e.begin].edge_from = i;
+      adj_e[e.end].edge_to = i;
+    }
+    for a in adj_e {
+      assert!((a.edge_from == BAD_EDGE) == (a.edge_to == BAD_EDGE));
+    }
   }
 
   fn retain_edges_by(&mut self, condition: impl Fn(usize) -> bool) {
@@ -402,50 +417,49 @@ impl ContourTopology {
       self.vertices.len(),
       VInfo { edge_from: BAD_VERTEX, next_v: BAD_VERTEX, skipped: false },
     );
-    let mut skipped_edges = Vec::new();
-
-    skipped_edges.resize(self.edges.len(), false);
     for (i, e) in self.edges.iter().enumerate() {
       next[e.begin] = VInfo { edge_from: i, next_v: e.end, skipped: false };
     }
 
+    let mut skipped_edges = Vec::new();
+    skipped_edges.resize(self.edges.len(), false);
+
+    let mut e2c = Vec::new();
+    e2c.resize(self.edges.len(), BAD_EDGE);
+
+    let mut edges = self.edges.clone();
     let mut finished = false;
     while !finished {
       finished = true;
-      'each_edge: for i in 0..self.edges.len() {
+      'each_edge: for i in 0..edges.len() {
         loop {
           if skipped_edges[i] {
             continue 'each_edge;
           }
-          let e = self.edges[i];
+          let e = edges[i];
           let new_begin = self.vertices[e.begin];
           let j = next[e.end].edge_from;
-          let new_end_index = self.edges[j].end;
-          let new_end = self.vertices[new_end_index];
+          let ne = edges[j];
+          //  assert!(e.end == ne.begin);
+          let new_end = self.vertices[ne.end];
           let mut skip = next[e.begin].next_v;
-          while skip != new_end_index {
+          while skip != ne.end {
             if dist_pl(self.vertices[skip], new_begin, new_end) > treshhold {
               continue 'each_edge;
             }
             skip = next[skip].next_v;
           }
 
-          if e.begin < e.end && self.edges[j].end < e.begin
-            || e.begin > e.end && self.edges[j].end > e.begin
-          {
-            self.edges[j].begin = e.begin;
-            skipped_edges[i] = true;
-            next[e.begin].edge_from = j;
-          } else {
-            self.edges[i].end = new_end_index;
-            skipped_edges[j] = true;
-          }
+          skipped_edges[j] = true;
+          e2c[j] = i;
+          edges[i].end = ne.end;
           next[e.end].skipped = true;
           finished = false;
         }
       }
     }
-    self.retain_edges_by(|i| !skipped_edges[i]);
+
+    self.regroup_chains(edges, e2c);
     self.retain_vertices_by(|i| !next[i].skipped);
   }
 
@@ -474,6 +488,26 @@ impl ContourTopology {
       }
     }
     contours
+  }
+
+  fn validate_edge_order(&self) -> bool {
+    let mut bit_buf = BitBuffer::new(self.vertices.len());
+    let mut vis = Vec::new();
+
+    for e in &self.edges {
+      bit_buf.put_range(e.begin, e.end, true, &mut vis);
+      let v_begin = self.vertices[e.begin];
+      let v_end = self.vertices[e.end];
+      let (v_begin, v_end) = if e.begin < e.end { (v_begin, v_end) } else { (v_end, v_begin) };
+      for &v in &vis {
+        if cross(self.vertices[v] - v_end, v_begin - v_end) < 0.0 {
+          return false;
+        }
+      }
+      vis.clear();
+    }
+
+    true
   }
 
   pub fn to_flat_figure(self) -> FlatFigure {
@@ -692,10 +726,6 @@ impl TmpResult {
       for e in edges {
         part.edges.push(Edge { begin: v2ord[e.begin].1, end: v2ord[e.end].1 });
       }
-    }
-
-    for (_, t) in &mut result {
-      t.regroup_chains();
     }
     result
   }
