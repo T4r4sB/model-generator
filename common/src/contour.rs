@@ -248,7 +248,6 @@ impl ContourTopology {
     const FINISH: usize = BAD_EDGE - 1;
     chains.resize(self.edges.len() + 1, BAD_EDGE);
     chains[self.edges.len()] = FINISH;
-
     fn get_e2c(e: usize, e2c: &mut [usize]) -> usize {
       let mut r = e2c[e];
       if r == BAD_EDGE {
@@ -444,6 +443,9 @@ impl ContourTopology {
           let e = edges[i];
           let new_begin = self.vertices[e.begin];
           let j = next[e.end].edge_from;
+          if i == j {
+            continue 'each_edge;
+          }
           let ne = edges[j];
           //  assert!(e.end == ne.begin);
           let new_end = self.vertices[ne.end];
