@@ -34,7 +34,7 @@ impl GripshiftCreator {
   }
 
   pub fn faces(&self) -> usize {
-    0
+    1
   }
 
   pub fn get_part_index(&self, pos: Point) -> PartIndex {
@@ -56,13 +56,13 @@ impl GripshiftCreator {
   }
 
   pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
-    let pos = Point { x: pos.x, y: 0.0, z: pos.y };
+    let pos = Point { x: 15.0, y: pos.x, z: pos.y };
     let part = self.get_part_index_impl(pos, current_normal);
-    (part != 0) as PartIndex
+    part
   }
 
   pub fn get_quality() -> usize {
-    384
+    512
   }
 
   pub fn get_size() -> f32 {
@@ -90,6 +90,7 @@ impl GripshiftCreator {
     let max_x = 70.0;
 
     fn z_to_i(z: f32, cup: bool) -> PartIndex {
+      return 0; // tmp
       let dcup = if cup { 2 } else { 0 };
       if z > 1.0 {
         return 10 + dcup;
@@ -249,7 +250,7 @@ impl GripshiftCreator {
         return 0;
       }
     }
-    return 0; // tmp
+   // return 0; // tmp
 
 
     if (r < drum_max_r && x > 3.0 || r < drum_max_r + 10.0 && x > cable1_x + cable2_x + 0.5)
@@ -283,10 +284,10 @@ impl GripshiftCreator {
       let (s1, c1) = 0.0.to_radians().sin_cos();
       let (y1, z1) = (pos.y * c1 - pos.z * s1, pos.y * s1 + pos.z * c1);
 
-      if y1 > 4.0 && y1 < 10.0 && (x - cable1_x).abs() < 2.5 && z1 > cable_traj_r {
-        return 0;
+      if y1 > 10.0 && y1 < 16.0 && (x - cable1_x).abs() < 2.5 && z1 > cable_traj_r {
+        //return 0;
       }
-      if y1 > 0.0 && y1 < 10.0 && sqr(x - cable1_x) + sqr(z1 - cable_traj_r) < sqr(2.5) {
+      if y1 > 0.0 && y1 < 16.0 && sqr(x - cable1_x) + sqr(z1 - cable_traj_r) < sqr(2.5) {
         return 0;
       }
 
@@ -297,10 +298,10 @@ impl GripshiftCreator {
       let (s2, c2) = (-75.0).to_radians().sin_cos();
       let (y2, z2) = (-(pos.y * c2 - pos.z * s2), pos.y * s2 + pos.z * c2);
 
-      if y2 > 4.0 && y2 < 10.0 && (x - cable2_x).abs() < 2.5 && z2 > cable_traj_r {
-        return 0;
+      if y2 > 10.0 && y2 < 16.0 && (x - cable2_x).abs() < 2.5 && z2 > cable_traj_r {
+        //return 0;
       }
-      if y2 > 0.0 && y2 < 10.0 && sqr(x - cable2_x) + sqr(z2 - cable_traj_r) < sqr(2.5) {
+      if y2 > 0.0 && y2 < 16.0 && sqr(x - cable2_x) + sqr(z2 - cable_traj_r) < sqr(2.5) {
         return 0;
       }
 
@@ -319,6 +320,7 @@ impl GripshiftCreator {
       let f = f32::max(f, m);
 
       if f > 0.0 {
+        return 0; // tmp
         return 1;
       }
       if f > -0.5 {
@@ -333,6 +335,8 @@ impl GripshiftCreator {
       }
       return 0;
     }
+
+    return 0; // tmp
 
     if r < drum_min_r + f32::clamp(x - (max_x - 5.0) - 0.2, 0.0, 2.0) - 0.5
       && x > min_x
