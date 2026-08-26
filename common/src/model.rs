@@ -87,22 +87,15 @@ impl Model {
   }
 
   pub fn write_to_buffer(&self, buffer: &mut ArrayBuffer, color: u32) {
-    buffer.v.reserve(buffer.v.len() + self.vertices.len() * 9);
+    buffer.v.reserve(buffer.v.len() + self.vertices.len() * 3);
     buffer.i.reserve(buffer.i.len() + self.triangles.len() * 3);
 
-    let old_v_len = (buffer.v.len() / 9) as u32;
-    let c = self.center();
+    let old_v_len = (buffer.v.len() / 3) as u32;
 
     for v in &self.vertices {
       buffer.v.push(v.x);
       buffer.v.push(v.z);
       buffer.v.push(v.y);
-      buffer.v.push(c.x);
-      buffer.v.push(c.z);
-      buffer.v.push(c.y);
-      buffer.v.push((color >> 16 & 0xff) as f32 / 255.0);
-      buffer.v.push((color >> 8 & 0xff) as f32 / 255.0);
-      buffer.v.push((color & 0xff) as f32 / 255.0);
     }
     for t in &self.triangles {
       buffer.i.push(old_v_len + t[0]);

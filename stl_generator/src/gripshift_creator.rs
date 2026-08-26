@@ -34,7 +34,7 @@ impl GripshiftCreator {
   }
 
   pub fn faces(&self) -> usize {
-    1
+    2
   }
 
   pub fn get_part_index(&self, pos: Point) -> PartIndex {
@@ -56,7 +56,10 @@ impl GripshiftCreator {
   }
 
   pub fn get_sticker_index(&self, pos: crate::points2d::Point, current_normal: usize) -> PartIndex {
-    let pos = Point { x: 15.0, y: pos.x, z: pos.y };
+    let pos = match current_normal {
+      0 => Point { x: 7.0, y: pos.x, z: pos.y },
+      _ => Point { x: 14.0, y: pos.x, z: pos.y },
+    };
     let part = self.get_part_index_impl(pos, current_normal);
     part
   }
@@ -277,31 +280,39 @@ impl GripshiftCreator {
         }
       }
 
-      if sqr(x - cable1_x) + sqr_if_neg(r - cable_traj_r) < sqr(0.8) {
-        return 0;
-      }
 
       let (s1, c1) = 0.0.to_radians().sin_cos();
       let (y1, z1) = (pos.y * c1 - pos.z * s1, pos.y * s1 + pos.z * c1);
 
-      if y1 > 10.0 && y1 < 16.0 && (x - cable1_x).abs() < 2.5 && z1 > cable_traj_r {
-        //return 0;
-      }
-      if y1 > 0.0 && y1 < 16.0 && sqr(x - cable1_x) + sqr(z1 - cable_traj_r) < sqr(2.5) {
+      let z1t = ((z1 - 5.0) * 0.1).clamp(0.0, 1.0);
+      let z1t = z1t * z1t * (3.0 - 2.0 * z1t);
+      let z1 = z1 + z1t;
+      let r1 = (sqr(y1) + sqr(z1)).sqrt();
+      if sqr(x - cable1_x) + sqr_if_neg(r1 - cable_traj_r) < sqr(0.8) {
         return 0;
       }
 
-      if sqr(x - cable2_x) + sqr_if_neg(r - cable_traj_r) < sqr(0.8) {
+      if y1 > 10.0 && y1 < 16.0 && (x - cable1_x).abs() < 2.5 && z1 > cable_traj_r {
+        //return 0;
+      }
+      if y1 > 0.0 && y1 < 26.0 && sqr(x - cable1_x) + sqr(z1 - cable_traj_r) < sqr(2.5) {
         return 0;
       }
 
       let (s2, c2) = (-75.0).to_radians().sin_cos();
       let (y2, z2) = (-(pos.y * c2 - pos.z * s2), pos.y * s2 + pos.z * c2);
+      let z2t = ((z2 - 5.0) * 0.1).clamp(0.0, 1.0);
+      let z2t = z2t * z2t * (3.0 - 2.0 * z2t);
+      let z2 = z2 + z2t;
+      let r2 = (sqr(y2) + sqr(z2)).sqrt();
+      if sqr(x - cable2_x) + sqr_if_neg(r2 - cable_traj_r) < sqr(0.8) {
+        return 0;
+      }
 
       if y2 > 10.0 && y2 < 16.0 && (x - cable2_x).abs() < 2.5 && z2 > cable_traj_r {
         //return 0;
       }
-      if y2 > 0.0 && y2 < 16.0 && sqr(x - cable2_x) + sqr(z2 - cable_traj_r) < sqr(2.5) {
+      if y2 > 0.0 && y2 < 26.0 && sqr(x - cable2_x) + sqr(z2 - cable_traj_r) < sqr(2.5) {
         return 0;
       }
 

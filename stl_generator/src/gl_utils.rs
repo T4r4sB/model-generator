@@ -66,10 +66,10 @@ precision mediump float;
 uniform mat4 proj;
 uniform mat4 view;
 uniform float shift;
+uniform vec3 center;
+uniform vec3 color;
 
 attribute vec3 position;
-attribute vec3 center;
-attribute vec3 color;
 
 varying vec3 v_color;
 varying vec3 v_pos;
@@ -84,7 +84,7 @@ void main() {
 \0";
 
 const FRAGMENT_SHADER_SOURCE: &[u8] = b"
-#version 130
+#version 100
 precision mediump float;
 
 varying vec3 v_color;
@@ -107,7 +107,7 @@ void main() {
         color.y = fract(color.y + 0.5);
         color.z = fract(color.z + 0.5);
     }*/
-    float n_factor = 1.0 + (normal.z - 1.0) * 0.3;
+    float n_factor = 1.0 + (-normal.z - 1.0) * 0.9;
     color = color * n_factor;
     color = white + (color - white) * factor;
     gl_FragColor = vec4(color, 1.0);
@@ -133,17 +133,22 @@ pub struct CameraPosition {
   pub anglez: f32,
 }
 
-pub struct GLData {
-  pub gl_context: GLContext,
-  pub program: Program,
+pub struct ModelData {
+  pub index_count: usize,
+  pub color: [f32; 3],
+  pub center: [f32; 3],
   pub vao: VertexArray,
   pub vbo: Buffer,
   pub veo: Buffer,
+}
 
+pub struct GLData {
+  pub gl_context: GLContext,
+  pub program: Program,
+  pub model_data: Vec<ModelData>,
   pub proj_matrix: Matrix,
   pub view_matrix: Matrix,
   pub shift: f32,
-  pub index_count: usize,
   pub prev_time: std::time::Instant,
   pub input_state: InputState,
   pub camera_position: CameraPosition,
@@ -235,6 +240,7 @@ pub fn init_gl(hwnd: HWND, models: &mut dyn Iterator<Item = (u32, &Model)>) -> A
     gl::ShaderSource::load_with(wgl_loader_callback);
     gl::Uniform1f::load_with(wgl_loader_callback);
     gl::GetUniformLocation::load_with(wgl_loader_callback);
+    gl::Uniform3fv::load_with(wgl_loader_callback);
     gl::UniformMatrix4fv::load_with(wgl_loader_callback);
     gl::UseProgram::load_with(wgl_loader_callback);
     gl::VertexAttribPointer::load_with(wgl_loader_callback);
@@ -262,51 +268,49 @@ pub fn init_gl(hwnd: HWND, models: &mut dyn Iterator<Item = (u32, &Model)>) -> A
       eprintln!("Failed to create program: {e}");
       APIResultCode::user()
     })?;
-    let vao = VertexArray::new();
-    let vbo = Buffer::new();
-    let veo = Buffer::new();
 
-    let mut array_buffer = ArrayBuffer::default();
-    while let Some((color, m)) = models.next() {
+    let mut model_data = Vec::new();
+    for (color, m) in models {
+      let mut array_buffer = ArrayBuffer::default();
+      let vao = VertexArray::new();
+      let vbo = Buffer::new();
+      let veo = Buffer::new();
+
       m.write_to_buffer(&mut array_buffer, color);
+
+      gl::BindVertexArray(vao.get());
+      gl::BindBuffer(gl::ARRAY_BUFFER, vbo.get());
+      gl::BufferData(
+        gl::ARRAY_BUFFER,
+        (array_buffer.v.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
+        array_buffer.v.as_ptr() as *const _,
+        gl::STATIC_DRAW,
+      );
+
+      gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, veo.get());
+      gl::BufferData(
+        gl::ELEMENT_ARRAY_BUFFER,
+        (array_buffer.i.len() * std::mem::size_of::<u32>()) as gl::types::GLsizeiptr,
+        array_buffer.i.as_ptr() as *const _,
+        gl::STATIC_DRAW,
+      );
+
+      let pos_attrib = gl::GetAttribLocation(program.get(), b"position\0".as_ptr() as *const _)
+        as gl::types::GLuint;
+      let f32_size = std::mem::size_of::<f32>() as gl::types::GLsizei;
+      gl::VertexAttribPointer(pos_attrib, 3, gl::FLOAT, 0, 3 * f32_size, std::ptr::null());
+      gl::EnableVertexAttribArray(pos_attrib);
+
+      let index_count = array_buffer.i.len();
+      let color = [
+        (color >> 16 & 0xff) as f32 / 255.0,
+        (color >> 8 & 0xff) as f32 / 255.0,
+        (color & 0xff) as f32 / 255.0,
+      ];
+      let center = m.center();
+      let center = [center.x, center.z, center.y];
+      model_data.push(ModelData { index_count, color, center, vao, vbo, veo });
     }
-
-    println!(
-      "models written to big buffer size {} vertices, {} indices",
-      array_buffer.v.len(),
-      array_buffer.i.len(),
-    );
-
-    gl::BindVertexArray(vao.get());
-    gl::BindBuffer(gl::ARRAY_BUFFER, vbo.get());
-    gl::BufferData(
-      gl::ARRAY_BUFFER,
-      (array_buffer.v.len() * std::mem::size_of::<f32>()) as gl::types::GLsizeiptr,
-      array_buffer.v.as_ptr() as *const _,
-      gl::STATIC_DRAW,
-    );
-
-    let pos_attrib =
-      gl::GetAttribLocation(program.get(), b"position\0".as_ptr() as *const _) as gl::types::GLuint;
-    let center_attrib =
-      gl::GetAttribLocation(program.get(), b"center\0".as_ptr() as *const _) as gl::types::GLuint;
-    let color_attrib =
-      gl::GetAttribLocation(program.get(), b"color\0".as_ptr() as *const _) as gl::types::GLuint;
-    let f32_size = std::mem::size_of::<f32>() as gl::types::GLsizei;
-    gl::VertexAttribPointer(pos_attrib, 3, gl::FLOAT, 0, 9 * f32_size, std::ptr::null());
-    gl::VertexAttribPointer(center_attrib, 3, gl::FLOAT, 0, 9 * f32_size, (3 * f32_size) as _);
-    gl::VertexAttribPointer(color_attrib, 3, gl::FLOAT, 0, 9 * f32_size, (6 * f32_size) as _);
-
-    gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, veo.get());
-    gl::BufferData(
-      gl::ELEMENT_ARRAY_BUFFER,
-      (array_buffer.i.len() * std::mem::size_of::<u32>()) as gl::types::GLsizeiptr,
-      array_buffer.i.as_ptr() as *const _,
-      gl::STATIC_DRAW,
-    );
-    gl::EnableVertexAttribArray(pos_attrib);
-    gl::EnableVertexAttribArray(center_attrib);
-    gl::EnableVertexAttribArray(color_attrib);
 
     gl::Enable(gl::DEPTH_TEST);
     gl::Enable(gl::CULL_FACE);
@@ -322,20 +326,16 @@ pub fn init_gl(hwnd: HWND, models: &mut dyn Iterator<Item = (u32, &Model)>) -> A
     let proj_matrix = Matrix::new_proj(std::f32::consts::FRAC_PI_8, aspect, 1000.0, 0.01);
     let view_matrix = Matrix::new_view(Point { x: 0.0, y: 0.0, z: 1.0 }, 0.0, 0.0);
     let shift = 0.0;
-    let index_count = array_buffer.i.len();
     let prev_time = std::time::Instant::now();
     let input_state = InputState::default();
 
     Ok(GLData {
       gl_context,
       program,
-      vao,
-      vbo,
-      veo,
+      model_data,
       proj_matrix,
       view_matrix,
       shift,
-      index_count,
       prev_time,
       input_state,
       camera_position,
@@ -348,14 +348,6 @@ pub fn gl_update_and_draw(context: &mut crate::gl_window::Context) {
     let gl_data = context.gl_data.as_mut().unwrap();
 
     gl::UseProgram(gl_data.program.get());
-    let proj_matrix_location =
-      gl::GetUniformLocation(gl_data.program.get(), b"proj\0".as_ptr() as *const _);
-    gl::UniformMatrix4fv(
-      proj_matrix_location,
-      1,
-      gl::FALSE,
-      gl_data.proj_matrix.as_ptr() as *const _,
-    );
 
     let current_time = std::time::Instant::now();
     let dt = (current_time - gl_data.prev_time).as_secs_f32();
@@ -421,8 +413,22 @@ pub fn gl_update_and_draw(context: &mut crate::gl_window::Context) {
     let angle_x = gl_data.camera_position.anglex;
     gl_data.view_matrix = Matrix::new_view(position, angle, angle_x);
 
+    gl::ClearColor(1.0, 1.0, 1.0, 1.0);
+    gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+
+    let proj_matrix_location =
+      gl::GetUniformLocation(gl_data.program.get(), b"proj\0".as_ptr() as *const _);
+    assert!(proj_matrix_location != -1);
+    gl::UniformMatrix4fv(
+      proj_matrix_location,
+      1,
+      gl::FALSE,
+      gl_data.proj_matrix.as_ptr() as *const _,
+    );
+
     let view_matrix_location =
       gl::GetUniformLocation(gl_data.program.get(), b"view\0".as_ptr() as *const _);
+    assert!(view_matrix_location != -1);
     gl::UniformMatrix4fv(
       view_matrix_location,
       1,
@@ -432,10 +438,21 @@ pub fn gl_update_and_draw(context: &mut crate::gl_window::Context) {
 
     let shift_location =
       gl::GetUniformLocation(gl_data.program.get(), b"shift\0".as_ptr() as *const _);
+    assert!(shift_location != -1);
     gl::Uniform1f(shift_location, gl_data.shift);
 
-    gl::ClearColor(1.0, 1.0, 1.0, 1.0);
-    gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-    gl::DrawElements(gl::TRIANGLES, gl_data.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+    for m in &gl_data.model_data {
+      gl::BindVertexArray(m.vao.get());
+      let color_location =
+        gl::GetUniformLocation(gl_data.program.get(), b"color\0".as_ptr() as *const _);
+      assert!(color_location != -1);
+      gl::Uniform3fv(color_location, 1, m.color.as_ptr() as *const _);
+
+      let center_location =
+        gl::GetUniformLocation(gl_data.program.get(), b"center\0".as_ptr() as *const _);
+      assert!(center_location != -1);
+      gl::Uniform3fv(center_location, 1, m.center.as_ptr() as *const _);
+      gl::DrawElements(gl::TRIANGLES, m.index_count as i32, gl::UNSIGNED_INT, std::ptr::null());
+    }
   }
 }
