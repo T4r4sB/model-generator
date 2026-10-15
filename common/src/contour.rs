@@ -1,8 +1,11 @@
 use crate::bit_buffer::*;
 use crate::points2d::*;
+/*
 use dxf::Drawing;
 use dxf::entities::*;
 use dxf::objects::*;
+*/
+
 use fxhash::FxHashMap;
 use std::collections::HashMap;
 use std::default;
@@ -82,78 +85,20 @@ impl FlatFigure {
   }
 
   pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
-    self.save_to_dxf_with_grid(path, false)
-  }
+    let mut writer = crate::dxf::DxfR12Writer::new(path)
+      .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))?;
 
-  pub fn save_to_dxf_with_grid(
-    &self,
-    path: &std::path::Path,
-    with_grid: bool,
-  ) -> Result<(), String> {
-    let mut drawing = Drawing::new();
-    drawing.header.drawing_units = dxf::enums::DrawingUnits::Metric;
-    {
-      // CYPCUT access violation fix
-      let dc = drawing.dim_styles().count();
-      for i in 0..dc {
-        drawing.remove_dim_style(dc - 1 - i);
-      }
+    fn point2d_to_dxf(pt: Point) -> (f64, f64) {
+      (pt.x as f64, pt.y as f64)
     }
 
-    let mut aabb = AABB::empty();
     for contour in &self.contours {
-      for &p in &contour.points {
-        aabb = aabb.with(p);
-      }
+      writer.add_polyline(contour.points.iter().copied().map(point2d_to_dxf), true).map_err(
+        |e| format!("Unable to write poliline to file {}: {}", path.to_string_lossy(), e),
+      )?;
     }
 
-    if with_grid {
-      fn point2d_to_dxf(pt: Point) -> dxf::Point {
-        dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 }
-      }
-      let cx1: &dyn Fn(_) -> _ = &|i: isize| Point { x: aabb.x1, y: i as f32 };
-      let cx2: &dyn Fn(_) -> _ = &|i: isize| Point { x: aabb.x2, y: i as f32 };
-      let cy1: &dyn Fn(_) -> _ = &|i: isize| Point { x: i as f32, y: aabb.y1 };
-      let cy2: &dyn Fn(_) -> _ = &|i: isize| Point { x: i as f32, y: aabb.y2 };
-      for (d, lc, skip10, color) in [
-        ((aabb.y1, aabb.y2), (&cx1, &cx2), true, 254),
-        ((aabb.x1, aabb.x2), (&cy1, &cy2), true, 254),
-        ((aabb.y1, aabb.y2), (&cx1, &cx2), false, 253),
-        ((aabb.x1, aabb.x2), (&cy1, &cy2), false, 253),
-      ] {
-        for i in d.0.floor() as isize..d.1.ceil() as isize + 1 {
-          if (i % 10 == 0) == skip10 {
-            continue;
-          }
-          let p1 = lc.0(i);
-          let p2 = lc.1(i);
-          let l = Line::new(point2d_to_dxf(p1), point2d_to_dxf(p2));
-          let mut e = Entity::new(EntityType::Line(l));
-          e.common.color = dxf::Color::from_index(color);
-          drawing.add_entity(e);
-        }
-      }
-    }
-    for contour in &self.contours {
-      let mut pl = Polyline::default();
-      for i in 0..contour.points.len() {
-        fn point2d_to_dxf(pt: Point) -> dxf::entities::Vertex {
-          dxf::entities::Vertex::new(dxf::Point { x: pt.x as f64, y: pt.y as f64, z: 0.0 })
-        }
-        let v = point2d_to_dxf(contour.points[i]);
-        pl.add_vertex(&mut drawing, v);
-      }
-      pl.set_is_closed(true);
-      let mut e = Entity::new(EntityType::Polyline(pl));
-      if with_grid {
-        e.common.color = dxf::Color::from_index(250);
-      }
-      drawing.add_entity(e);
-    }
-
-    drawing
-      .save_file(path)
-      .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))
+    writer.close().map_err(|e| format!("Unable to close file {} : {}", path.to_string_lossy(), e))
   }
 
   pub fn generate_triangle_contours(&self) -> Self {
@@ -275,7 +220,11 @@ impl ContourTopology {
       e2c: &mut [usize],
     ) -> usize {
       let prev_e = sorted_e.upper_bound(edge, BAD_EDGE);
-      if prev_e == BAD_EDGE { if_fail } else { get_e2c(prev_e, e2c) }
+      if prev_e == BAD_EDGE {
+        if_fail
+      } else {
+        get_e2c(prev_e, e2c)
+      }
     }
 
     for v in 0..self.vertices.len() {
