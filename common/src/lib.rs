@@ -3,7 +3,6 @@
 pub mod bit_buffer;
 pub mod common_for_twisty_puzzles;
 pub mod contour;
-pub mod dxf;
 pub mod matrix;
 pub mod model;
 pub mod points2d;

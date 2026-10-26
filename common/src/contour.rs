@@ -1,10 +1,5 @@
 use crate::bit_buffer::*;
 use crate::points2d::*;
-/*
-use dxf::Drawing;
-use dxf::entities::*;
-use dxf::objects::*;
-*/
 
 use fxhash::FxHashMap;
 use std::collections::HashMap;
@@ -85,7 +80,7 @@ impl FlatFigure {
   }
 
   pub fn save_to_dxf(&self, path: &std::path::Path) -> Result<(), String> {
-    let mut writer = crate::dxf::DxfR12Writer::new(path)
+    let mut writer = dxf::DxfR12Writer::new(path)
       .map_err(|e| format!("Unable to open file {} for writing: {}", path.to_string_lossy(), e))?;
 
     fn point2d_to_dxf(pt: Point) -> (f64, f64) {

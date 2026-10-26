@@ -266,10 +266,6 @@ impl Model {
 
     let start = std::time::Instant::now();
     loop {
-      println!(
-        "get_normal_groups with tol {tol}, {} grouped...",
-        cnt_grouped as f32 * 100.0 / self.triangles.len() as f32
-      );
       let next_tol = tol + f32::min(tol * 9.0, max_step);
       let last_iter = next_tol > max_tol;
       let mut complete = true;
@@ -338,14 +334,6 @@ impl Model {
         break;
       }
     }
-
-    println!("generating normals elapsed {:?}", std::time::Instant::now() - start);
-    println!(
-      "{} grouped in {} groups, {} ungrouped",
-      cnt_grouped as f32 * 100.0 / self.triangles.len() as f32,
-      normal_of_g.len(),
-      self.triangles.len() - cnt_grouped
-    );
 
     NormalGroups { group_of_t, normal_of_g }
   }
@@ -574,9 +562,7 @@ impl Model {
   }
 
   pub fn optimize(&mut self, max_tol: f32, min_group_size: f32) {
-    println!("get topology...");
     let top = self.get_topology();
-    println!("get normal groups...");
     let mut ng = self.get_normal_groups(&top, max_tol, min_group_size);
 
     let buf = ChangeTriangleBuffer::default();
@@ -591,7 +577,6 @@ impl Model {
 
     let start = std::time::Instant::now();
     loop {
-      println!("start loop iter with {ttc} valid triangles");
       let mut merged = false;
       ti.shuffle(&mut rng);
       'enumerate_triangles: for &t in &ti {
@@ -614,10 +599,6 @@ impl Model {
         break;
       }
     }
-    println!(
-      "end loop with {ttc} valid triangles and {:?} time",
-      std::time::Instant::now() - start
-    );
 
     let mut j = 0;
     for i in 0..self.triangles.len() {
@@ -626,7 +607,6 @@ impl Model {
         j += 1;
       }
     }
-    println!("check: {j} valid triangles");
 
     self.triangles.truncate(j);
   }

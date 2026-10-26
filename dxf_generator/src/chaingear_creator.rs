@@ -5,7 +5,7 @@ use png::InterlaceInfo::Adam7;
 
 //use common::slots_and_holes::*;
 
-const ERR: f32 = 0.1;
+const ERR: f32 = 0.05;
 
 const PI: f32 = std::f32::consts::PI;
 
@@ -17,6 +17,7 @@ enum GearCouple {
   Inner3Euro,
   Inner6,
   Adapter7Bolt,
+  Disk6Bolt,
 }
 
 enum GearInfill {
@@ -76,6 +77,7 @@ impl GearContour {
       GearCouple::Inner3Euro => DriverHole3EuroData::minr(),
       GearCouple::Inner6 => DriverHole6Data::minr(),
       GearCouple::Adapter7Bolt => Adapter7BoltsData::minr(),
+      GearCouple::Disk6Bolt => Disk6BoltsData::minr(),
     }
   }
 
@@ -210,6 +212,47 @@ impl Adapter7BoltsData {
   fn inside(&self, pos: Point) -> bool {
     let bolt_r = 65.0 * 0.5;
     for &bh in &self.bolt_holes {
+      let l = (pos - bh).len();
+      if l < 2.5 + ERR {
+        return true;
+      }
+      if l < 5.5 {
+        return false;
+      }
+    }
+    pos.len() < bolt_r - 1.0
+  }
+}
+
+struct Disk6BoltsData {
+  bolt_holes: [Point; 6],
+  bolt_holes_in: [Point; 12],
+}
+
+impl Disk6BoltsData {
+  fn new() -> Self {
+    let bolt_r = 44.0 * 0.5;
+
+    let bolt_holes = std::array::from_fn(|i| {
+      Point::from_angle(i as f32 * 2.0 * PI / 6.0).scale(bolt_r)
+      // r_in: 2.5, r_out: 5.5
+    });
+
+    let bolt_holes_in = std::array::from_fn(|i| {
+      Point::from_angle((i as f32 + 0.5) * 2.0 * PI / 12.0).scale(27.5)
+      // r_in: 0.0, r_out: 3.0
+    });
+
+    Self { bolt_holes, bolt_holes_in }
+  }
+
+  fn minr() -> f32 {
+    26.0
+  }
+
+  fn inside(&self, pos: Point) -> bool {
+    let bolt_r = 43.0 * 0.5;
+    for &bh in self.bolt_holes.iter().chain(&self.bolt_holes_in) {
       let l = (pos - bh).len();
       if l < 2.5 + ERR {
         return true;
@@ -396,6 +439,7 @@ pub struct ChaingearCreator {
   h3e: DriverHole3EuroData,
   h6: DriverHole6Data,
   a7b: Adapter7BoltsData,
+  d6b: Disk6BoltsData,
 }
 
 impl ChaingearCreator {
@@ -403,13 +447,15 @@ impl ChaingearCreator {
     let gears = vec![
       GearContour::new(27, GearCouple::Inner3Euro, GearInfill::Spiral),
       GearContour::new(23, GearCouple::Inner3Euro, GearInfill::Grid),
+      GearContour::new(19, GearCouple::Disk6Bolt, GearInfill::Grid),
     ];
 
     let h3e = DriverHole3EuroData::new();
     let h6 = DriverHole6Data::new();
     let a7b = Adapter7BoltsData::new();
+    let d6b = Disk6BoltsData::new();
 
-    Self { gears, h3e, h6, a7b }
+    Self { gears, h3e, h6, a7b, d6b }
   }
 
   pub fn get_count(&self, part_index: usize) -> usize {
@@ -435,6 +481,7 @@ impl ChaingearCreator {
       GearCouple::Inner3Euro => format!("{}-rear-3pins-euro", g.tc),
       GearCouple::Inner6 => format!("{}-rear-6pins", g.tc),
       GearCouple::Adapter7Bolt => format!("{}-rear-adater7bolts", g.tc),
+      GearCouple::Disk6Bolt => format!("{}-rear-dick6bolts", g.tc),
     };
     Some(desc)
   }
@@ -448,6 +495,7 @@ impl ChaingearCreator {
         GearCouple::Inner3Euro => self.h3e.inside(pos),
         GearCouple::Inner6 => self.h6.inside(pos),
         GearCouple::Adapter7Bolt => self.a7b.inside(pos),
+        GearCouple::Disk6Bolt => self.d6b.inside(pos),
       };
 
       if in_couple {

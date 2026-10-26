@@ -10,11 +10,17 @@ use std::time::Instant;
 
 use fxhash::FxHashMap;
 
-mod chaingear_creator;
-type PartCreator = chaingear_creator::ChaingearCreator;
+mod tugnutt_creator;
+type PartCreator = tugnutt_creator::TugnuttCreator;
 
-//mod clickbox2_creator;
-//type PartCreator = clickbox2_creator::ClickboxCreator;
+//mod chaingear_creator;
+//type PartCreator = chaingear_creator::ChaingearCreator;
+
+//mod clicker_creator;
+//type PartCreator = clicker_creator::ClickerCreator;
+
+//mod brake_tool_creator;
+//type PartCreator = brake_tool_creator::BrakeToolCreator;
 
 /*
 pub struct ImgBuffer {
@@ -439,6 +445,7 @@ fn create_mockup() {
 }
 */
 
+
 fn main() {
   let start = Instant::now();
   let part_creator = PartCreator::new();
@@ -494,7 +501,7 @@ fn main() {
 
       let cc = figure.generate_triangle_contours();
       if let Err(msg) =
-        cc.save_to_dxf(&std::path::Path::new("contours").join(format!("{full_name}_TR.dxf")))
+        cc.save_to_dxf(&std::path::Path::new("triangulations").join(format!("{full_name}.dxf")))
       {
         println!("{}", msg);
       }

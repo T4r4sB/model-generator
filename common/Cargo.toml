@@ -9,3 +9,4 @@ edition = "2021"
 stl_io = "0.7.0"
 fxhash = "0.2.1"
 rand = "0.8.5"
+dxf = { path = "../dxf" }

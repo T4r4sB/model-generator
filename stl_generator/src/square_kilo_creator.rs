@@ -93,6 +93,7 @@ impl SquareKiloCreator {
           if (dot(a2, a3) - edge).abs() > 0.01 {
             continue;
           }
+          println!("{}, {}, {}", ia1+1, ia2+1, ia3+1);
           unavailable.insert((ia1, ia3));
           unavailable.insert((ia2, ia3));
           ignore.push(ia3);
@@ -107,7 +108,7 @@ impl SquareKiloCreator {
 
     let special_edges: FxHashMap<_, _> = special_edges
       .into_iter()
-      .take(3)
+      .take(4)
       .map(|(e, ignore)| {
         let index = 1 << e.0 | 1 << e.1;
         use rand::Rng;
@@ -206,7 +207,7 @@ impl SquareKiloCreator {
 
   pub fn faces(&self) -> usize {
     //self.normals.len()
-    0
+    2
   }
 
   pub fn get_part_index(&self, pos: Point) -> PartIndex {
@@ -262,7 +263,7 @@ impl SquareKiloCreator {
         return 0;
       }
       for &a in &self.axis {
-        if dot(pos, a) > 0.0 && cross(pos, a).len() > 1.2 {
+        if dot(pos, a) > 0.0 && cross(pos, a).len() < 1.2 {
           return 0;
         }
       }
