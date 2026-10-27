@@ -573,6 +573,14 @@ pub trait Couple {
   fn get_overlap(&self) -> f32 {
     (self.get_l1() + self.get_l2()) / (PI * COS0)
   }
+
+  fn get_avg_dist(&self) -> f32 {
+    let l1 = self.get_l1();
+    let l2 = self.get_l2();
+    (l1 * l1.abs() + l2 * l2.abs()) / (l1 + l2) * 0.5
+  }
+
+  fn get_friction(&self) -> f32;
 }
 
 impl Couple for OutCouple {
@@ -709,6 +717,11 @@ impl Couple for OutCouple {
 
   fn get_l2(&self) -> f32 {
     self.g2.total_couple_part() - self.g2.profile.basic_r() * self.angle.tan()
+  }
+
+  fn get_friction(&self) -> f32 {
+    self.get_avg_dist()
+      * (self.get_g1().profile().basic_r().recip() + self.get_g2().profile().basic_r().recip())
   }
 }
 
@@ -849,8 +862,9 @@ impl Couple for InCouple {
     self.g2.profile.basic_r() * self.angle.tan() - self.g2.total_couple_part()
   }
 
-  fn get_overlap(&self) -> f32 {
-    (self.get_l1() + self.get_l2()) / (PI * COS0)
+  fn get_friction(&self) -> f32 {
+    self.get_avg_dist()
+      * (self.get_g1().profile().basic_r().recip() - self.get_g2().profile().basic_r().recip())
   }
 }
 

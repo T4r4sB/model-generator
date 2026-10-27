@@ -52,7 +52,9 @@ where
   println!("  w1={}", c.get_top_w1());
   println!("  w2={}", c.get_top_w2());
   println!("  couple length={}", c.get_couple_length());
-  println!("  overlap={}", c.get_overlap());
+  println!("  overlap={}, avg dst={}", c.get_overlap(), c.get_avg_dist());
+  println!("  friction={}", c.get_friction());
+  println!("  l1={}, l2={}", c.get_l1(), c.get_l2());
   println!("  g1 fillet={}", c.get_g1().get_fillet_r());
   println!("  g2 fillet={}", c.get_g2().get_fillet_r());
   println!("  failed rg1={}", c.failed_raidal_gap1());
@@ -105,13 +107,25 @@ where
           println!("By old instrument:");
           print_couple_stats(&oc);
 
-          draw_couple(&new.produce_out_instrument_couple(p1).unwrap(), "couple_new_1.dxf");
-          draw_couple(&C::new_g2_couple(new, p2).unwrap(), "couple_new_2.dxf");
-          draw_couple(&old.produce_out_instrument_couple(p1).unwrap(), "couple_old_1.dxf");
-          draw_couple(&C::new_g2_couple(old, p2).unwrap(), "couple_old_2.dxf");
+          draw_couple(
+            &new.produce_out_instrument_couple(p1).unwrap(),
+            std::path::Path::new("couple_new_1.dxf"),
+          );
+          draw_couple(
+            &C::new_g2_couple(new, p2).unwrap(),
+            std::path::Path::new("couple_new_2.dxf"),
+          );
+          draw_couple(
+            &old.produce_out_instrument_couple(p1).unwrap(),
+            std::path::Path::new("couple_old_1.dxf"),
+          );
+          draw_couple(
+            &C::new_g2_couple(old, p2).unwrap(),
+            std::path::Path::new("couple_old_2.dxf"),
+          );
 
-          draw_couple(&nc, "gears_by_new.dxf");
-          draw_couple(&oc, "gears_by_old.dxf");
+          draw_couple(&nc, std::path::Path::new("gears_by_new.dxf"));
+          draw_couple(&oc, std::path::Path::new("gears_by_old.dxf"));
         }
 
         return (Ok(couple_stats(&nc)), Ok(couple_stats(&oc)));
@@ -171,7 +185,7 @@ fn test_rail(x1: f32, x2: f32, config: &Config) -> Vec<ResultWithCoords> {
       if config.show {
         println!("By rail:");
         print_couple_stats(&c);
-        draw_couple(&c, "gears_by_rail.dxf");
+        draw_couple(&c, std::path::Path::new("gears_by_rail.dxf"));
       }
 
       Ok(couple_stats(&c))
@@ -210,7 +224,7 @@ where
       if config.show {
         println!("By perfect:");
         print_couple_stats(&c);
-        draw_couple(&c, "gears_by_perfect.dxf");
+        draw_couple(&c, std::path::Path::new("gears_by_perfect.dxf"));
       }
 
       Ok(couple_stats(&c))
@@ -295,15 +309,33 @@ fn test_planet(x1: f32, x2: f32, config: &Config) -> Vec<ResultWithCoords> {
             println!("Inner by old instrument:");
             print_couple_stats(&ioc);
 
-            draw_couple(&new.produce_out_instrument_couple(p1).unwrap(), "couple_new_1.dxf");
-            draw_couple(&new.produce_out_instrument_couple(p2).unwrap(), "couple_new_2.dxf");
-            draw_couple(&new.produce_in_instrument_couple(p3).unwrap(), "couple_new_3.dxf");
-            draw_couple(&old.produce_out_instrument_couple(p1).unwrap(), "couple_old_1.dxf");
-            draw_couple(&old.produce_out_instrument_couple(p2).unwrap(), "couple_old_2.dxf");
-            draw_couple(&old.produce_in_instrument_couple(p3).unwrap(), "couple_old_3.dxf");
+            draw_couple(
+              &new.produce_out_instrument_couple(p1).unwrap(),
+              std::path::Path::new("couple_new_1.dxf"),
+            );
+            draw_couple(
+              &new.produce_out_instrument_couple(p2).unwrap(),
+              std::path::Path::new("couple_new_2.dxf"),
+            );
+            draw_couple(
+              &new.produce_in_instrument_couple(p3).unwrap(),
+              std::path::Path::new("couple_new_3.dxf"),
+            );
+            draw_couple(
+              &old.produce_out_instrument_couple(p1).unwrap(),
+              std::path::Path::new("couple_old_1.dxf"),
+            );
+            draw_couple(
+              &old.produce_out_instrument_couple(p2).unwrap(),
+              std::path::Path::new("couple_old_2.dxf"),
+            );
+            draw_couple(
+              &old.produce_in_instrument_couple(p3).unwrap(),
+              std::path::Path::new("couple_old_3.dxf"),
+            );
 
-            draw_planet_couple(&onc, &inc, "planet_gears_by_new.dxf");
-            draw_planet_couple(&ooc, &ioc, "planet_gears_by_old.dxf");
+            draw_planet_couple(&onc, &inc, std::path::Path::new("planet_gears_by_new.dxf"));
+            draw_planet_couple(&ooc, &ioc, std::path::Path::new("planet_gears_by_old.dxf"));
           }
 
           return vec![
@@ -339,22 +371,22 @@ fn test_planet(x1: f32, x2: f32, config: &Config) -> Vec<ResultWithCoords> {
 fn test(x1: f32, x2: f32, config: &Config) -> Vec<ResultWithCoords> {
   // test_chisel::<InCouple>(x1, x2, config)
   // test_chisel::<OutCouple>(x1, x2, config)
-  // test_planet(x1, x2, config)
+  test_planet(x1, x2, config)
   // test_rail(x1, x2, config)
 
-  test_perfect::<InCouple>(x1, x2, &config)
+  //test_perfect::<InCouple>(x1, x2, &config)
 }
 
 fn main() {
-  let mut config = Config { z1: 9, z2: 24, z3: 70, show: false, radial_gap: None };
+  let mut config = Config { z1: 16, z2: 13, z3: 44, show: false, radial_gap: None };
 
   config.show = true;
 
   if config.show {
-    let d = OutCouple::dist(Profile { z: 4, x: 1.2 }, Profile { z: 12, x: 0.2 }).unwrap();
-    println!("d={d}");
-    let c = InCouple::sum_of_corrections(9, 24, d);
-    test(0.6, c+0.6, &config);
+    //let d = OutCouple::dist(Profile { z: 4, x: 1.2 }, Profile { z: 12, x: 0.2 }).unwrap();
+    //println!("d={d}");
+    //let c = InCouple::sum_of_corrections(9, 24, d);
+    test(0.7, 0.7, &config);
     println!("Couple printed");
     return;
   }

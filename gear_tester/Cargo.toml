@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 gears = { path = "../gears" }
+dxf = { path = "../dxf" }
 png = "0.17.16"
-dxf = "0.5.0"
 
 stats_alloc = "0.1.10"
