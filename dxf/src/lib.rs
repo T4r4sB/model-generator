@@ -29,6 +29,38 @@ impl DxfR12Writer {
         writeln!(writer, "  9\n$MEASUREMENT\n 70\n1")?;
         writeln!(writer, "  0\nENDSEC")?;
 
+        writeln!(writer, "  0\nSECTION\n  2\nTABLES")?;
+        writeln!(writer, "  0\nTABLE\n  2\nLAYER\n 70\n1")?;
+        writeln!(writer, "  0\nLAYER\n  2\n0\n 70\n0\n 62\n7\n370\n0")?;
+        writeln!(writer, "  0\nENDTAB")?;
+        writeln!(writer, "  0\nENDSEC")?;
+
+/*
+          0
+SECTION
+  2
+TABLES
+  0
+TABLE
+  2
+LAYER
+ 70
+1
+  0
+LAYER
+  2
+0
+ 70
+0
+ 62
+7
+370
+0
+  0
+ENDTAB
+  0
+ENDSEC*/
+
         // 2. ОТКРЫВАЕМ СЕКЦИЮ ENTITIES (Геометрия)
         writeln!(writer, "  0\nSECTION\n  2\nENTITIES")?;
 
