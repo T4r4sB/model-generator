@@ -25,44 +25,31 @@ impl DxfR12Writer {
 
         // 1. СЕКЦИЯ HEADER: Указываем Систему Мер (миллиметры)
         // Код 9 — имя переменной, код 70 со значением 1 — Метрическая система (мм)
-        writeln!(writer, "  0\nSECTION\n  2\nHEADER")?;
-        writeln!(writer, "  9\n$MEASUREMENT\n 70\n1")?;
-        writeln!(writer, "  0\nENDSEC")?;
-
-        writeln!(writer, "  0\nSECTION\n  2\nTABLES")?;
-        writeln!(writer, "  0\nTABLE\n  2\nLAYER\n 70\n1")?;
-        writeln!(writer, "  0\nLAYER\n  2\n0\n 70\n0\n 62\n7\n370\n0")?;
-        writeln!(writer, "  0\nENDTAB")?;
-        writeln!(writer, "  0\nENDSEC")?;
-
-/*
-          0
+        writeln!(
+            writer,
+            "  0
 SECTION
   2
-TABLES
-  0
-TABLE
-  2
-LAYER
+HEADER
+  9
+$ACADVER
+  1
+AC1009
+  9
+$MEASUREMENT
  70
 1
+  9
+$LWDISPLAY
+ 290
+0        <-- ВЫКЛЮЧАЕТ ОТОБРАЖЕНИЕ ТОЛЩИНЫ ДЛЯ ВСЕХ САПР
   0
-LAYER
+ENDSEC
+  0
+SECTION
   2
-0
- 70
-0
- 62
-7
-370
-0
-  0
-ENDTAB
-  0
-ENDSEC*/
-
-        // 2. ОТКРЫВАЕМ СЕКЦИЮ ENTITIES (Геометрия)
-        writeln!(writer, "  0\nSECTION\n  2\nENTITIES")?;
+ENTITIES"
+        )?;
 
         let closed = false;
 
@@ -71,19 +58,39 @@ ENDSEC*/
 
     // Метод для записи простой линии (LINE)
     pub fn add_line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64) -> std::io::Result<()> {
-        writeln!(self.writer, "  0\nLINE\n  8\n0")?; // Слой 0
-                                                     // writeln!(self.writer, " 62\n{}", 253)?;
-        writeln!(self.writer, " 10\n{}\n 20\n{}", x1, y1)?; // Старт (X, Y)
-        writeln!(self.writer, " 11\n{}\n 21\n{}", x2, y2)?; // Конец (X, Y)
+        writeln!(
+            self.writer,
+            "  0
+LINE
+  8
+0
+ 10
+{x1}
+ 20
+{y1}
+ 11
+{x2}
+ 21
+{y2}"
+        )?;
         Ok(())
     }
 
     // Метод для записи окружности (CIRCLE)
     pub fn add_circle(&mut self, x: f64, y: f64, r: f64) -> std::io::Result<()> {
-        writeln!(self.writer, "  0\nCIRCLE\n  8\n0")?; // Слой 0
-                                                       // writeln!(self.writer, " 62\n{}", 253)?;
-        writeln!(self.writer, " 10\n{}\n 20\n{}", x, y)?; // Центр (X, Y)
-        writeln!(self.writer, " 40\n{}", r)?; // Радиус (R)
+        writeln!(
+            self.writer,
+            "  0
+CIRCLE
+  8
+0
+ 10
+{x}
+ 20
+{y}
+ 40
+{r}"
+        )?;
         Ok(())
     }
 
@@ -96,29 +103,54 @@ ENDSEC*/
         closed: bool,
     ) -> std::io::Result<()> {
         // Объявляем объект POLYLINE
-        writeln!(self.writer, "  0\nPOLYLINE\n  8\n0")?; // Слой 0
-                                                         // writeln!(self.writer, " 62\n{}", 253)?;
-        writeln!(self.writer, " 66\n1")?;
 
-        // Код 70 отвечает за флаги полилинии. Значение 1 — замкнутая, 0 — разомкнутая.
         let flag = if closed { 1 } else { 0 };
-        writeln!(self.writer, " 70\n{}", flag)?;
+        writeln!(
+            self.writer,
+            "  0
+POLYLINE
+  8
+0
+ 66
+1
+ 70
+{flag}"
+        )?;
 
         // Записываем каждую точку в виде отдельного суб-объекта VERTEX
         for (x, y) in vertices {
-            writeln!(self.writer, "  0\nVERTEX\n  8\n0")?;
-            writeln!(self.writer, " 10\n{}\n 20\n{}", x, y)?;
+            writeln!(
+                self.writer,
+                "  0
+VERTEX
+  8
+0
+ 10
+{x}
+ 20
+{y}"
+            )?;
         }
 
         // Обязательный маркер SEQEND, завершающий последовательность точек полилинии
-        writeln!(self.writer, "  0\nSEQEND")?;
+        writeln!(
+            self.writer,
+            "  0
+SEQEND"
+        )?;
         Ok(())
     }
 
     // Метод закрытия файла (Закрываем ENTITIES и пишем маркер конца файла EOF)
     pub fn close(mut self) -> std::io::Result<()> {
         self.closed = true;
-        writeln!(self.writer, "  0\nENDSEC\n  0\nEOF")?;
+        writeln!(
+            self.writer,
+            "  0
+ENDSEC
+  0
+EOF"
+        )?;
         Ok(())
     }
 }
